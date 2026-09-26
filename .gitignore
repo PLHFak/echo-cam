@@ -1,0 +1,26 @@
+# Environnement Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Poids de modeles (RIFE) — lourds, ne pas versionner
+*.pkl
+*.pth
+*.pt
+*.onnx
+
+# Moteurs TensorRT compiles (specifiques a la machine)
+*.engine
+*.trt
+
+# Videos et captures
+*.mp4
+*.mov
+*.avi
+*.png
+*.jpg
+
+# Systeme
+.DS_Store
+Thumbs.db
