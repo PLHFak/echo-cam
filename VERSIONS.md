@@ -1,7 +1,10 @@
 # Bibliothèque des versions
 
-Chaque version est figée sur GitHub et reste téléchargeable pour toujours :
-**github.com/PLHFak/echo-cam/tags** → bouton **zip** en face de la version voulue.
+Chaque version est figée sur GitHub et reste téléchargeable pour toujours.
+Pour récupérer une version précise, coller dans le navigateur (remplacer v1.3
+par le numéro voulu) :
+
+    https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
 ## v1.3 — 27-09-2026 · Référence automatique
 - Immobile pendant N secondes (±15 % de largeur d'épaules) : la lecture
