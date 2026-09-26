@@ -24,3 +24,6 @@ __pycache__/
 # Systeme
 .DS_Store
 Thumbs.db
+
+# Resultat du diagnostic (propre a chaque machine)
+diagnostic.txt
