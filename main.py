@@ -9,8 +9,8 @@ Prototype volontairement simple : le ralenti se fait en RE-AFFICHANT les images
 du buffer (pas encore d'interpolation). Le ralenti profond saccadera donc un peu
 -> c'est la brique RIFE qu'on ajoutera en V2 pour le rendre fluide.
 
-Dependances : opencv-python, mediapipe, numpy
-Lancer :      python main.py
+Dependances : voir requirements.txt (mediapipe 0.10.21, Python 3.12)
+Lancer :      double-clic sur lancer.bat (Windows) ou python main.py
 Touches :     C = (re)calibrer a 2 m   |   Q = quitter
 """
 
