@@ -10,7 +10,7 @@ l'écran, se fige tout près, et rattrape le direct quand on recule.
 2. Dans la recherche du Store, tapez **Python 3.12**.
 3. Cliquez sur **Python 3.12** (éditeur : Python Software Foundation) → **Obtenir**.
 
-> Prenez bien **3.12**, pas 3.13 ni 3.14 : la brique de détection du corps
+> Prenez **3.12** (ou gardez une 3.11 déjà installée), pas 3.13 ni 3.14 : la brique de détection du corps
 > (MediaPipe) ne fonctionne pas encore avec les versions plus récentes.
 
 ### 2. Télécharger le programme

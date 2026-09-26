@@ -12,7 +12,7 @@ if not exist venv\installe.txt (
     if not exist venv\Scripts\python.exe python -m venv venv
     if not exist venv\Scripts\python.exe (
         echo.
-        echo ERREUR : Python 3.12 est introuvable. Installez-le depuis le Microsoft Store.
+        echo ERREUR : Python 3.11 ou 3.12 est introuvable. Installez Python 3.12 depuis le Microsoft Store.
         pause
         exit /b 1
     )
