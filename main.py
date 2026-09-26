@@ -11,7 +11,8 @@ du buffer (pas encore d'interpolation). Le ralenti profond saccadera donc un peu
 
 Dependances : voir requirements.txt (mediapipe 0.10.21, Python 3.12)
 Lancer :      double-clic sur lancer.bat (Windows) ou python main.py
-Touches :     C = (re)calibrer a 2 m   |   Q = quitter
+Touches :     C = (re)calibrer a 2 m   |   1..9, 0 = duree d'immobilite (1..10 s)
+              avant que la position courante devienne la reference   |   Q = quitter
 """
 
 import time
@@ -40,6 +41,9 @@ ABSENT_TIMEOUT = 10.0     # s — sans detection, on garde la derniere distance
                           #     puis on considere la salle vide et on revient au direct
 
 CALIB_DISTANCE = 2.0      # distance (m) a laquelle on calibre la largeur d'epaules
+
+STABLE_TOL     = 0.15     # ±15 % de variation de largeur d'epaules = immobile
+STABLE_SECONDS = 10.0     # duree d'immobilite avant nouvelle reference (touches 1..9, 0)
 
 # ---------------------------------------------------------------------------
 def speed_for_distance(d, delay):
@@ -86,8 +90,11 @@ def main():
     stamps     = deque(maxlen=max_frames)   # heure de capture de chaque image (s)
     widths     = deque(maxlen=SMOOTH_WINDOW) # largeurs d'epaules recentes
 
-    ref_width  = None    # largeur d'epaules mesuree a CALIB_DISTANCE (calibration)
+    ref_width  = None    # largeur d'epaules de la position de reference
     delay      = 0.0     # retard courant, en secondes, par rapport au direct
+    stable_secs  = STABLE_SECONDS  # duree d'immobilite avant nouvelle reference
+    anchor_w     = None  # largeur d'epaules au debut de la periode d'immobilite
+    stable_since = 0.0   # heure du debut de la periode d'immobilite
     last_dist  = None    # derniere distance mesuree
     last_seen  = 0.0     # heure de la derniere detection
     prev_t     = time.monotonic()
@@ -114,6 +121,15 @@ def main():
             if sw:
                 widths.append(sw)
                 sw_smooth = float(np.mean(widths))
+
+                # --- immobile depuis stable_secs (±15 %) ? -> la position
+                #     courante devient la reference 0 (et on rattrape le direct)
+                if anchor_w is None or abs(sw_smooth - anchor_w) > STABLE_TOL * anchor_w:
+                    anchor_w, stable_since = sw_smooth, now
+                elif now - stable_since >= stable_secs:
+                    ref_width = sw_smooth
+                    anchor_w, stable_since = sw_smooth, now
+
                 if ref_width:
                     # distance ~ inversement proportionnelle a la largeur d'epaules
                     distance = CALIB_DISTANCE * (ref_width / sw_smooth)
@@ -140,10 +156,11 @@ def main():
 
         # --- overlay d'etat ---
         if ref_width is None:
-            draw_text(out, "Placez-vous a 2 m puis pressez C pour calibrer", 60)
+            draw_text(out, f"Restez immobile {stable_secs:.0f}s (ou pressez C a 2 m) pour calibrer", 60)
         else:
             d_txt = f"{distance:.2f} m" if distance else "-- (personne)"
-            draw_text(out, f"Distance {d_txt}   Vitesse {v:.2f}   Retard {delay:.1f}s", 60)
+            draw_text(out, f"Distance {d_txt}   Vitesse {v:.2f}   Retard {delay:.1f}s"
+                           f"   Ref apres {stable_secs:.0f}s", 60)
 
         cv2.imshow(win, out)
 
@@ -154,6 +171,9 @@ def main():
             ref_width = float(np.mean(widths))  # calibration a la distance courante (2 m)
             delay = 0.0
             last_dist = None
+            anchor_w = None
+        if ord('0') <= key <= ord('9'):         # duree d'immobilite : 1..9 s, 0 = 10 s
+            stable_secs = 10.0 if key == ord('0') else float(key - ord('0'))
 
     cap.release()
     pose.close()

@@ -28,8 +28,27 @@ l'écran, se fige tout près, et rattrape le direct quand on recule.
 
 ## Utilisation
 
-- Placez-vous à **2 m** de la caméra et pressez **C** pour calibrer.
-- **C** = recalibrer · **Q** = quitter.
+Au lancement, restez simplement immobile ~10 s : votre position devient la
+référence (lecture en direct). Approchez-vous : l'image ralentit, puis se fige.
+Si vous restez immobile 10 s quelque part, la lecture rattrape le direct et
+cette position devient la nouvelle référence.
+
+### Touches
+
+| Touche | Effet |
+|---|---|
+| **1** à **9** | Durée d'immobilité avant nouvelle référence : 1 à 9 s |
+| **0** | Durée d'immobilité : 10 s |
+| **C** | Calibration manuelle : la position courante devient la référence (2 m) |
+| **Q** | Quitter |
+
+Une variation de largeur d'épaules sous **±15 %** compte comme immobile
+(`STABLE_TOL` dans `main.py`).
+
+## Mettre à jour
+
+Double-cliquez sur **mettre_a_jour.bat** : la dernière version est téléchargée
+depuis GitHub, sans réinstallation.
 
 ## Réglages
 
