@@ -6,14 +6,15 @@ ralentit ; tout pres, l'image se fige. Quand elle recule, la lecture reprend
 puis accelere pour rattraper le direct. Immobile N secondes : la position
 courante devient la reference 0 (lecture en direct).
 
-Socle V2 : panneau lateral de reglages (curseurs + etat en direct) et
-verification PyTorch/CUDA au demarrage. Les briques RIFE (interpolation,
-touche I) et fond virtuel (touche V) arrivent dans les etapes suivantes.
+V2 : panneau lateral de reglages (curseurs + etat en direct), verification
+PyTorch/CUDA au demarrage, ralenti fluide par interpolation RIFE v4.7 sur GPU
+(touche I). Le fond virtuel (touche V) arrive a l'etape suivante.
 
 Dependances : voir requirements.txt (mediapipe 0.10.21, torch cu124, Py 3.11/3.12)
 Lancer :      double-clic sur lancer.bat (Windows) ou python main.py
-Touches :     C = calibrer   |   1..9, 0 = duree d'immobilite (1..10 s)
-              avant nouvelle reference   |   Q = quitter
+Touches :     C = calibrer   |   I = interpolation RIFE on/off
+              1..9, 0 = duree d'immobilite avant nouvelle reference
+              Q = quitter
 """
 
 import time
@@ -113,7 +114,7 @@ def panel_read():
 
 
 def panel_draw(lines):
-    img = np.full((250, 460, 3), 30, np.uint8)
+    img = np.full((320, 460, 3), 30, np.uint8)
     for i, (txt, ok) in enumerate(lines):
         color = (120, 255, 120) if ok else (120, 120, 255)
         cv2.putText(img, txt, (15, 35 + 30 * i), cv2.FONT_HERSHEY_SIMPLEX,
@@ -125,6 +126,16 @@ def panel_draw(lines):
 def main():
     cuda_ok, cuda_txt = gpu_status()
     print(f"[ECHO] {cuda_txt}")
+
+    rife, rife_txt = None, "RIFE non charge"
+    try:
+        from rife import Rife
+        rife = Rife()
+        rife_txt = f"RIFE v4.7 pret ({rife.device.type})"
+    except Exception as e:
+        rife_txt = f"RIFE indisponible ({type(e).__name__})"
+    print(f"[ECHO] {rife_txt}")
+    interp_on = rife is not None and cuda_ok   # defaut : ON si GPU, sinon OFF
 
     cap = cv2.VideoCapture(CAM_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAP_WIDTH)
@@ -213,30 +224,43 @@ def main():
         delay = max(0.0, min(delay, now - stamps[0]))
 
         # --- image a afficher : celle capturee a (now - delay) ---
-        # (etape suivante : interpolation RIFE entre les deux voisines)
-        idx = bisect_left(stamps, now - delay)
-        out = buffer[min(idx, len(buffer) - 1)].copy()
+        target = now - delay
+        idx = min(bisect_left(stamps, target), len(buffer) - 1)
+        interpolating = False
+        if (interp_on and rife is not None and idx > 0 and v < 0.999
+                and stamps[idx] > stamps[idx - 1]):
+            t = (target - stamps[idx - 1]) / (stamps[idx] - stamps[idx - 1])
+            if 0.02 < t < 0.98:                 # interpolation RIFE entre voisines
+                out = rife.interpolate(buffer[idx - 1], buffer[idx], t)
+                interpolating = True
+        if not interpolating:
+            out = buffer[idx].copy()
         out = cv2.flip(out, 1)                  # effet miroir horizontal
 
         # --- overlays ---
         if ref_width is None:
             draw_text(out, f"Restez immobile {stable_secs:.0f}s (ou C) pour calibrer", 60)
         d_txt = f"{distance:.2f} m" if distance else "--"
+        interp_state = ("ON" if interp_on else "OFF") if rife else "indisponible"
         panel_draw([
             (cuda_txt, cuda_ok),
+            (f"Interpolation RIFE : {interp_state} (touche I)",
+             interp_on and rife is not None),
             (f"Distance : {d_txt}", distance is not None),
             (f"Vitesse : {v:.2f}   Retard : {delay:.1f} s", True),
             (f"Camera : {fps_meas:.0f} im/s", fps_meas > 20),
             (f"Reference : {'calibree' if ref_width else 'en attente'}", ref_width is not None),
             (f"Nouvelle ref apres {stable_secs:.0f} s immobile", True),
             (f"Buffer : {len(buffer) / FPS:.0f} / {buffer_s} s", True),
-            ("Touches : C ref, 1..0 duree, Q quitter", True),
+            ("Touches : C ref, I interp, 1..0 duree, Q quitter", True),
         ])
         cv2.imshow(WIN_MAIN, out)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
+        if key == ord('i') and rife is not None:
+            interp_on = not interp_on
         if key == ord('c') and widths:
             ref_width = float(np.mean(widths))
             delay = 0.0

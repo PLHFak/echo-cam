@@ -6,6 +6,14 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.5 — 27-09-2026 · Ralenti fluide (interpolation RIFE)
+- Interpolation RIFE v4.7 sur GPU (fp16) entre les deux images qui encadrent
+  le retard : le ralenti profond devient fluide. Touche **I** = on/off
+  (ON par défaut quand CUDA est disponible).
+- Poids (rife47.pth, 20 Mo) téléchargés automatiquement par `lancer.bat`.
+- Architecture IFNet reprise (licence MIT) de ComfyUI-Frame-Interpolation,
+  validée ici contre les poids réels (objet déplacé retrouvé à mi-chemin).
+
 ## v1.4 — 27-09-2026 · Socle V2 : panneau de réglages + PyTorch CUDA
 - Panneau latéral « ECHO — Réglages » : curseurs seuils arrêt/direct,
   vitesse de rattrapage, profondeur du buffer (redimensionné en direct),

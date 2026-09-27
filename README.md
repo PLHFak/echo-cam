@@ -40,6 +40,7 @@ cette position devient la nouvelle référence.
 | **1** à **9** | Durée d'immobilité avant nouvelle référence : 1 à 9 s |
 | **0** | Durée d'immobilité : 10 s |
 | **C** | Calibration manuelle : la position courante devient la référence (2 m) |
+| **I** | Interpolation RIFE on/off (ralenti fluide, GPU) |
 | **Q** | Quitter |
 
 Une variation de largeur d'épaules sous **±15 %** compte comme immobile
