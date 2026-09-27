@@ -68,27 +68,41 @@ défaut entre parenthèses. La touche **R** remet tout aux valeurs par défaut.
 Les réglages plus fins (lissage, délai salle vide `ABSENT_TIMEOUT`, tolérance
 d'immobilité) restent en tête de `main.py`.
 
+## Caméra : tableau de contrôle
+
+Double-cliquez sur **camera_controle.bat** :
+1. il mesure ce que la caméra sait vraiment faire (chaque résolution ×
+   cadence demandée → ce que le pilote accorde et la cadence réellement
+   mesurée), résultat aussi dans `camera_controle.txt` ;
+2. il ouvre le **panneau de réglages du pilote** (exposition, luminosité,
+   formats…) avec un aperçu en direct affichant la cadence réelle.
+
+Une caméra « simplement HD » plafonne souvent à 30 im/s en 720p : ce n'est
+pas un problème, l'écran reste alimenté à 60 im/s par l'interpolation RIFE.
+
 ## Debug (continuité du flux)
 
 Le panneau affiche une ligne **Anomalies** : `cam` = images caméra manquantes,
-`retard` = cycles d'affichage au-delà des 33 ms, `saut` = discontinuités dans
+`retard` = cycles d'affichage au-delà des 16,7 ms, `saut` = discontinuités dans
 la lecture (le plus souvent : buffer trop court pour le retard demandé).
 Le détail est journalisé dans la console et dans `echo_debug.log` — à
 m'envoyer si quelque chose semble saccadé.
 
-## Interpolation RIFE (ralenti fluide)
+## Interpolation RIFE (60 im/s à l'écran)
 
-En ralenti, l'image affichée est fabriquée par **RIFE** (GPU NVIDIA requis) :
-une image intermédiaire est calculée à l'instant exact entre les deux images
-voisines du buffer, au lieu de répéter la plus proche. L'affichage est cadencé
-à **30 images/s minimum**, indépendamment de la caméra.
+L'affichage est cadencé à **60 images/s** (écran 60 Hz), indépendamment de la
+caméra qui reste à 30. À chaque image affichée, **RIFE** (GPU NVIDIA requis)
+calcule l'image exacte entre les deux images voisines du buffer — en ralenti
+comme en direct : la caméra donne 30 im/s, l'écran en reçoit 60. Pour cela,
+la lecture vit avec une micro-latence fixe d'environ 50 ms, imperceptible.
 
 - Les poids du modèle (~21 Mo) sont téléchargés automatiquement au premier
-  lancement dans `models/`.
+  lancement dans `models/`. Calcul en demi-précision (fp16) sur le GPU.
 - Sans GPU CUDA, le programme fonctionne normalement, sans interpolation
   (l'état est affiché dans le panneau de réglages).
-- Si l'interpolation est trop lente pour tenir 30 im/s, elle est coupée
-  automatiquement (et retentée périodiquement) — la cadence prime.
+- Si l'interpolation est trop lente pour tenir 60 im/s (budget 16,7 ms),
+  elle est coupée automatiquement (et retentée périodiquement) — la
+  cadence prime.
 
 ## Prochaine étape
 

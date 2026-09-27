@@ -6,6 +6,16 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.7 — 27-09-2026 · 60 im/s à l'écran (écran 60 Hz)
+- Affichage cadencé à **60 im/s** : RIFE fabrique l'image intermédiaire à
+  chaque rafraîchissement, en ralenti comme en direct (caméra toujours à
+  30 im/s). Micro-latence fixe d'~50 ms pour toujours avoir deux images
+  autour de l'instant affiché.
+- RIFE en demi-précision (fp16, autocast) + autotune cudnn + warm-up à la
+  taille réelle : l'interpolation 720p tient dans le budget de 16,7 ms.
+- `camera_controle.bat` : mesure les modes réels de la caméra (résolution ×
+  cadence) et ouvre le panneau de réglages du pilote avec aperçu en direct.
+
 ## v1.6 — 27-09-2026 · Rendu 30 im/s garanti, réglages expliqués, debug
 - Refonte : capture et analyse dans un thread ; affichage cadencé à
   **30 im/s minimum**. Si RIFE dépasse le budget de 33 ms, il est coupé

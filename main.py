@@ -7,9 +7,12 @@ puis accelere pour rattraper le direct. Immobile N secondes : la position
 courante devient la reference 0 (lecture en direct).
 
 V2 : la capture et l'analyse tournent dans un thread ; l'affichage est cadence
-a 30 images/s minimum. En ralenti, l'image affichee est fabriquee par RIFE
-(interpolation GPU) entre les deux images voisines du buffer : le ralenti est
-fluide au lieu de repeter les images. Touche I pour couper/retablir RIFE.
+a 60 images/s (ecran 60 Hz), independamment de la camera (30 im/s). L'image
+affichee est fabriquee en permanence par RIFE (interpolation GPU) entre les
+deux images voisines du buffer — en ralenti comme en direct : la camera donne
+30 im/s, l'ecran recoit 60. Touche I pour couper/retablir RIFE.
+Pour toujours avoir deux images autour de l'instant affiche, la lecture vit
+avec une micro-latence fixe de ~50 ms (LIVE_LATENCY), imperceptible.
 
 Dependances : voir requirements.txt (mediapipe 0.10.21, torch cu124, Py 3.11/3.12)
 Lancer :      double-clic sur lancer.bat (Windows) ou python main.py
@@ -41,7 +44,11 @@ CAP_WIDTH      = 1280
 CAP_HEIGHT     = 720
 FPS            = 30       # cadence camera, sert au dimensionnement du buffer
 
-RENDER_FPS     = 30       # cadence d'affichage minimale garantie (consigne)
+RENDER_FPS     = 60       # cadence d'affichage : ecran 60 Hz (la camera, elle,
+                          # reste a 30 im/s ; RIFE fabrique les images entre)
+LIVE_LATENCY   = 1.5 / FPS  # ~50 ms de latence fixe pour toujours avoir deux
+                            # images autour de l'instant affiche (interpolation
+                            # possible meme en direct)
 
 DIST_STOP      = 0.5      # m — en dessous, image figee
 DIST_FULL      = 2.0      # m — au dessus, direct / rattrapage
@@ -285,7 +292,9 @@ def main():
     cuda_ok, cuda_txt = gpu_status()
     print(f"[ECHO] {cuda_txt}")
 
-    rife = RifeInterpolator()          # telecharge les poids au premier lancement
+    # telecharge les poids au premier lancement ; warm-up a la taille reelle
+    # pour que la premiere interpolation soit deja dans le budget des 16,7 ms
+    rife = RifeInterpolator(warmup_size=(CAP_HEIGHT, CAP_WIDTH))
     print(f"[ECHO] {rife.status}")
 
     cap = cv2.VideoCapture(CAM_INDEX)
@@ -351,8 +360,8 @@ def main():
                 if cv2.waitKey(20) & 0xFF in (ord('q'), ord('Q'), 27):
                     break
                 continue
-            delay = max(0.0, min(delay, now - st.stamps[0]))
-            target = now - delay
+            delay = max(0.0, min(delay, now - LIVE_LATENCY - st.stamps[0]))
+            target = now - LIVE_LATENCY - delay
 
             # --- debug : saut dans la continuite de lecture ---
             # sans a-coup, l'instant affiche avance exactement de v*dt ;
@@ -380,7 +389,7 @@ def main():
         frac = (target - t_prev) / (t_next - t_prev) if t_next > t_prev else 1.0
         used_rife = False
         too_slow = rife_cost >= 0.75 * budget
-        if (rife_on and rife.ok and delay > 0.02 and 0.04 < frac < 0.96
+        if (rife_on and rife.ok and 0.04 < frac < 0.96
                 and (not too_slow or n_frame % 90 == 0)):
             t0 = time.monotonic()
             out = rife.interpolate(img_prev, img_next, frac)
@@ -404,8 +413,8 @@ def main():
         elif rife_cost >= 0.75 * budget:
             rife_txt, rife_ok = "RIFE trop lent -> image la plus proche", False
         else:
-            rife_txt = f"RIFE actif ({rife_cost * 1000:.0f} ms)" if used_rife \
-                       else "RIFE pret (direct : inutile)"
+            rife_txt = f"RIFE actif 60 im/s ({rife_cost * 1000:.1f} ms)" \
+                       if used_rife else "RIFE pret"
             rife_ok = True
         panel_draw([
             (cuda_txt, cuda_ok),

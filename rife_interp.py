@@ -50,9 +50,10 @@ def _ensure_weights():
 class RifeInterpolator:
     """ok = pret ; status = texte pour le panneau de reglages."""
 
-    def __init__(self, require_cuda=True):
+    def __init__(self, require_cuda=True, warmup_size=(128, 128)):
         self.ok = False
         self.status = "RIFE : non charge"
+        self._warmup_size = warmup_size
         try:
             import torch
             self._torch = torch
@@ -64,6 +65,11 @@ class RifeInterpolator:
             from rife_arch import IFNet
             self.device = torch.device("cuda" if torch.cuda.is_available()
                                        else "cpu")
+            # demi-precision + autotune cudnn : necessaires pour tenir
+            # 60 im/s (budget 16,7 ms par image interpolee)
+            self.autocast = self.device.type == "cuda"
+            if self.autocast:
+                torch.backends.cudnn.benchmark = True
             net = IFNet(arch_ver=ARCH_VER)
             sd = torch.load(path, map_location="cpu", weights_only=True)
             sd = {k.replace("module.", ""): v for k, v in sd.items()}
@@ -78,11 +84,12 @@ class RifeInterpolator:
             print(f"[ECHO] RIFE indisponible : {e}")
 
     def _warmup(self):
-        """Premier passage a vide : initialise les kernels CUDA pour que la
-        premiere vraie interpolation ne prenne pas plusieurs centaines de ms."""
+        """Passages a vide a la taille reelle des images : initialise les
+        kernels CUDA et l'autotune cudnn pour que la premiere vraie
+        interpolation ne prenne pas plusieurs centaines de ms."""
         import numpy as np
-        vide = np.zeros((128, 128, 3), np.uint8)
-        for _ in range(2):
+        vide = np.zeros((*self._warmup_size, 3), np.uint8)
+        for _ in range(3):
             self.interpolate(vide, vide, 0.5)
 
     def interpolate(self, img0, img1, t):
@@ -93,7 +100,12 @@ class RifeInterpolator:
                   .permute(2, 0, 1).unsqueeze(0).float() / 255.0)
             t1 = (torch.from_numpy(img1).to(self.device)
                   .permute(2, 0, 1).unsqueeze(0).float() / 255.0)
-            out = self.net(t0, t1, timestep=float(t),
-                           scale_list=SCALE_LIST, training=False)
-            out = (out[0].clamp(0, 1) * 255.0).byte()
+            if self.autocast:
+                with torch.autocast("cuda", dtype=torch.float16):
+                    out = self.net(t0, t1, timestep=float(t),
+                                   scale_list=SCALE_LIST, training=False)
+            else:
+                out = self.net(t0, t1, timestep=float(t),
+                               scale_list=SCALE_LIST, training=False)
+            out = (out[0].float().clamp(0, 1) * 255.0).byte()
             return out.permute(1, 2, 0).contiguous().cpu().numpy()
