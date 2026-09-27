@@ -101,20 +101,45 @@ class RifeInterpolator:
             # reussie ferait planter la boucle d'affichage a chaque image
             self.ok = True
             self.status = f"RIFE 4.9 pret ({self.device.type.upper()})"
+            nom_gpu = (torch.cuda.get_device_name(0)
+                       if self.device.type == "cuda" else "CPU")
+            h, w = self._warmup_size
+            _journal(f"verif GPU : modele sur {next(net.parameters()).device}"
+                     f" ({nom_gpu}) | fp16 autocast : "
+                     f"{'oui' if self.autocast else 'non'} | warm-up {w}x{h} "
+                     f"synchronise : pleine {self.warmup_ms['pleine']:.1f} ms,"
+                     f" demi {self.warmup_ms['demi']:.1f} ms | memoire GPU "
+                     f"{self.gpu_mem_mb()} Mo")
         except Exception as e:
             self.status = f"RIFE : erreur ({type(e).__name__})"
             _journal(f"init impossible : {e}\n{traceback.format_exc()}")
 
     def _warmup(self):
         """Passages a vide a la taille reelle des images (pleine et demie) :
-        initialise les kernels CUDA et l'autotune cudnn pour que la premiere
-        vraie interpolation ne prenne pas plusieurs centaines de ms."""
+        initialise les kernels CUDA et l'autotune cudnn, puis chronometre un
+        passage synchronise par palier — c'est la preuve mesuree de
+        l'execution GPU (un 720p en ~10 ms est impossible sur CPU)."""
         import numpy as np
+        torch = self._torch
         vide = np.zeros((*self._warmup_size, 3), np.uint8)
-        for half in (False, True):
-            for _ in range(3):
+        self.warmup_ms = {}
+        for half, nom in ((False, "pleine"), (True, "demi")):
+            for _ in range(2):
                 self.interpolate(vide, vide, 0.5, half=half)
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.monotonic()
+            self.interpolate(vide, vide, 0.4, half=half)
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
+            self.warmup_ms[nom] = (time.monotonic() - t0) * 1000.0
             self._cache_key = None
+
+    def gpu_mem_mb(self):
+        """Memoire GPU allouee par ce processus (Mo) ; 0 hors CUDA."""
+        if getattr(self, "device", None) is None or self.device.type != "cuda":
+            return 0
+        return int(self._torch.cuda.memory_allocated() // (1 << 20))
 
     def _to_tensor(self, img):
         torch = self._torch
