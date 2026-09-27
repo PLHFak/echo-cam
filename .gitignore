@@ -31,3 +31,6 @@ diagnostic.txt
 # Journal de debug (propre a chaque machine)
 echo_debug.log
 camera_controle.txt
+
+# Versions baptisees (reglages propres a chaque machine)
+presets.json

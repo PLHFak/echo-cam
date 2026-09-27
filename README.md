@@ -37,12 +37,36 @@ cette position devient la nouvelle référence.
 
 | Touche | Effet |
 |---|---|
-| **1** à **9** | Durée d'immobilité avant nouvelle référence : 1 à 9 s |
-| **0** | Durée d'immobilité : 10 s |
 | **C** | Calibration manuelle : la position courante devient la référence (2 m) |
 | **I** | Interpolation RIFE : couper / rétablir |
+| **H** | Mode du HUD incrusté : complet → vitesse seule → aucun |
+| **S** | Sauvegarder la version courante (taper un nom, **Entrée**) |
+| **←/→** | Version précédente / suivante (reset propre du run) |
+| **P** | Masquer / afficher le panneau de réglages |
 | **R** | Remettre tous les curseurs aux valeurs par défaut |
+| **1** à **9**, **0** | Durée d'immobilité avant nouvelle référence (1..9 s, 0 = 10 s) |
 | **Q** ou **Échap** | Quitter (cliquer d'abord sur la fenêtre vidéo) |
+
+### Les trois zones de distance
+
+- plus près que **Arrêt** (0,5 m) : image **figée** (avec 10 cm d'hystérésis
+  pour ne pas osciller au seuil) ;
+- entre **Arrêt** et **Direct** (2 m) : **ralenti** progressif (v de 0 à 1) ;
+- entre **Direct** et **Accel** (3 m) : **accélération** progressive
+  (v de 1 à Vmax) — le retard se résorbe en douceur ;
+- au-delà d'**Accel** : rattrapage plein (Vmax). Une fois le retard à zéro,
+  la lecture reste en direct.
+
+La distance **et** la vitesse sont lissées (double lissage) : pas d'à-coup
+en entrée ni en sortie de zone.
+
+### Versions baptisées
+
+**S** sauvegarde tous les réglages courants sous un nom (ex. « douce »,
+« nerveuse », « démo ») dans `presets.json` — elles survivent au redémarrage.
+Les flèches **←/→** passent de l'une à l'autre avec un reset propre (buffer
+et retard remis à zéro). La liste apparaît dans le panneau, la version active
+dans le HUD.
 
 Une variation de largeur d'épaules sous **±15 %** compte comme immobile
 (`STABLE_TOL` dans `main.py`).
