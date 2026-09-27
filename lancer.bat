@@ -32,17 +32,10 @@ if errorlevel 1 (
     copy /y requirements.txt venv\req_installee.txt >nul
 )
 
-if not exist rife47.pth (
-    echo.
-    echo === Telechargement des poids RIFE (20 Mo)... ===
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest 'https://github.com/Fannovel16/ComfyUI-Frame-Interpolation/releases/download/models/rife47.pth' -OutFile 'rife47.pth'"
-    if not exist rife47.pth (
-        echo AVERTISSEMENT : poids RIFE non telecharges, interpolation indisponible.
-    )
-)
+if not exist rife47.pth echo === Telechargement des poids RIFE, 20 Mo... ===
+if not exist rife47.pth powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest 'https://github.com/Fannovel16/ComfyUI-Frame-Interpolation/releases/download/models/rife47.pth' -OutFile 'rife47.pth'"
+if not exist rife47.pth echo AVERTISSEMENT : poids RIFE non telecharges, interpolation indisponible.
 
-echo.
-venv\Scripts\python.exe -c "import torch; ok=torch.cuda.is_available(); print('CUDA disponible :', ok); print('GPU :', torch.cuda.get_device_name(0) if ok else 'aucun')"
 echo.
 echo === Lancement ===
 venv\Scripts\python.exe main.py
