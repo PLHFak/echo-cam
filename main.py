@@ -1,21 +1,23 @@
 """
-Projet ECHO — Jouer avec le temps (V2, socle)
----------------------------------------------
+Projet ECHO — Jouer avec le temps (V2 : interpolation RIFE)
+-----------------------------------------------------------
 La webcam filme la personne. Plus elle s'approche de l'ecran, plus la lecture
 ralentit ; tout pres, l'image se fige. Quand elle recule, la lecture reprend
 puis accelere pour rattraper le direct. Immobile N secondes : la position
 courante devient la reference 0 (lecture en direct).
 
-Socle V2 : panneau lateral de reglages (curseurs + etat en direct) et
-verification PyTorch/CUDA au demarrage. Les briques RIFE (interpolation,
-touche I) et fond virtuel (touche V) arrivent dans les etapes suivantes.
+V2 : la capture et l'analyse tournent dans un thread ; l'affichage est cadence
+a 30 images/s minimum. En ralenti, l'image affichee est fabriquee par RIFE
+(interpolation GPU) entre les deux images voisines du buffer : le ralenti est
+fluide au lieu de repeter les images. Touche I pour couper/retablir RIFE.
 
 Dependances : voir requirements.txt (mediapipe 0.10.21, torch cu124, Py 3.11/3.12)
 Lancer :      double-clic sur lancer.bat (Windows) ou python main.py
-Touches :     C = calibrer   |   1..9, 0 = duree d'immobilite (1..10 s)
-              avant nouvelle reference   |   Q = quitter
+Touches :     C = calibrer   |   I = interpolation RIFE on/off
+              1..9, 0 = duree d'immobilite (1..10 s)   |   Q ou Echap = quitter
 """
 
+import threading
 import time
 from bisect import bisect_left
 from collections import deque
@@ -24,13 +26,17 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
+from rife_interp import RifeInterpolator
+
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau de reglages)
 # ---------------------------------------------------------------------------
 CAM_INDEX      = 0        # 0 = webcam par defaut
 CAP_WIDTH      = 1280
 CAP_HEIGHT     = 720
-FPS            = 30       # sert au dimensionnement du buffer
+FPS            = 30       # cadence camera, sert au dimensionnement du buffer
+
+RENDER_FPS     = 30       # cadence d'affichage minimale garantie (consigne)
 
 DIST_STOP      = 0.5      # m — en dessous, image figee
 DIST_FULL      = 2.0      # m — au dessus, direct / rattrapage
@@ -113,7 +119,7 @@ def panel_read():
 
 
 def panel_draw(lines):
-    img = np.full((250, 460, 3), 30, np.uint8)
+    img = np.full((280, 460, 3), 30, np.uint8)
     for i, (txt, ok) in enumerate(lines):
         color = (120, 255, 120) if ok else (120, 120, 255)
         cv2.putText(img, txt, (15, 35 + 30 * i), cv2.FONT_HERSHEY_SIMPLEX,
@@ -122,62 +128,56 @@ def panel_draw(lines):
 
 
 # ---------------------------------------------------------------------------
-def main():
-    cuda_ok, cuda_txt = gpu_status()
-    print(f"[ECHO] {cuda_txt}")
+# Etat partage entre le thread de capture/analyse et la boucle d'affichage
+# ---------------------------------------------------------------------------
+class Shared:
+    def __init__(self, max_frames):
+        self.lock       = threading.Lock()
+        self.buffer     = deque(maxlen=max_frames)   # images brutes (BGR)
+        self.stamps     = deque(maxlen=max_frames)   # heure de capture
+        self.running    = True
+        self.distance   = None      # derniere distance estimee (m)
+        self.ref_width  = None      # largeur d'epaules de reference
+        self.fps_cam    = 0.0       # cadence camera mesuree
+        self.stable_secs = STABLE_SECONDS   # ecrit par l'affichage (touches/panneau)
+        self.want_max_frames = max_frames   # redimensionnement demande du buffer
+        self.calib_request   = False        # touche C
 
-    cap = cv2.VideoCapture(CAM_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAP_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAP_HEIGHT)
-    cap.set(cv2.CAP_PROP_FPS, FPS)
-    if not cap.isOpened():
-        raise SystemExit("Impossible d'ouvrir la webcam (verifier CAM_INDEX).")
 
-    pose = mp.solutions.pose.Pose(model_complexity=1,
-                                  min_detection_confidence=0.5,
-                                  min_tracking_confidence=0.5)
-
-    buffer_s   = BUFFER_SECONDS
-    max_frames = int(buffer_s * FPS)
-    buffer     = deque(maxlen=max_frames)    # images brutes (BGR)
-    stamps     = deque(maxlen=max_frames)    # heure de capture de chaque image
-    widths     = deque(maxlen=SMOOTH_WINDOW) # largeurs d'epaules recentes
-
-    ref_width  = None    # largeur d'epaules de la position de reference
-    delay      = 0.0     # retard courant (s) par rapport au direct
-    last_dist  = None    # derniere distance mesuree
-    last_seen  = 0.0     # heure de la derniere detection
-    anchor_w     = None  # largeur d'epaules au debut de la periode d'immobilite
+def capture_thread(cap, pose, st):
+    """Capture + detection de posture + estimation de distance, a la cadence
+    de la camera. L'affichage tourne dans la boucle principale, a part."""
+    widths       = deque(maxlen=SMOOTH_WINDOW)
+    anchor_w     = None    # largeur d'epaules au debut de la periode d'immobilite
     stable_since = 0.0
-    stable_keys  = None  # duree fixee par les touches 1..0 (prioritaire sur curseur)
-    prev_t     = time.monotonic()
-    fps_meas   = 0.0
+    last_dist    = None
+    last_seen    = 0.0
+    prev_t       = time.monotonic()
+    fps_meas     = 0.0
 
-    cv2.namedWindow(WIN_MAIN, cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty(WIN_MAIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-    panel_create()
-
-    while True:
+    while st.running:
         ok, frame = cap.read()
         if not ok:
+            st.running = False
             break
         now = time.monotonic()
         dt, prev_t = now - prev_t, now
         fps_meas = 0.9 * fps_meas + 0.1 * (1.0 / dt if dt > 0 else 0.0)
 
-        d_stop, d_full, catchup, want_buffer_s, stable_panel = panel_read()
-        stable_secs = stable_keys if stable_keys is not None else float(stable_panel)
-
-        # --- redimensionnement du buffer en direct ---
-        if want_buffer_s != buffer_s:
-            buffer_s   = want_buffer_s
-            max_frames = int(buffer_s * FPS)
-            buffer = deque(buffer, maxlen=max_frames)
-            stamps = deque(stamps, maxlen=max_frames)
-
-        buffer.append(frame)
-        stamps.append(now)
+        with st.lock:
+            if st.want_max_frames != st.buffer.maxlen:
+                st.buffer = deque(st.buffer, maxlen=st.want_max_frames)
+                st.stamps = deque(st.stamps, maxlen=st.want_max_frames)
+            st.buffer.append(frame)
+            st.stamps.append(now)
         h, w = frame.shape[:2]
+
+        # --- calibration manuelle (touche C, demandee par l'affichage) ---
+        if st.calib_request:
+            st.calib_request = False
+            if widths:
+                st.ref_width = float(np.mean(widths))
+                anchor_w, last_dist = None, None
 
         # --- estimation de la distance ---
         res = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -191,12 +191,12 @@ def main():
                 # immobile depuis stable_secs (±STABLE_TOL) ? -> nouvelle reference
                 if anchor_w is None or abs(sw_smooth - anchor_w) > STABLE_TOL * anchor_w:
                     anchor_w, stable_since = sw_smooth, now
-                elif now - stable_since >= stable_secs:
-                    ref_width = sw_smooth
+                elif now - stable_since >= st.stable_secs:
+                    st.ref_width = sw_smooth
                     anchor_w, stable_since = sw_smooth, now
 
-                if ref_width:
-                    distance = CALIB_DISTANCE * (ref_width / sw_smooth)
+                if st.ref_width:
+                    distance = CALIB_DISTANCE * (st.ref_width / sw_smooth)
                     last_dist, last_seen = distance, now
 
         # --- personne perdue : garder la derniere distance, puis salle vide ---
@@ -207,44 +207,148 @@ def main():
                 last_dist = None
                 widths.clear()
 
+        st.distance = distance
+        st.fps_cam  = fps_meas
+
+
+# ---------------------------------------------------------------------------
+def main():
+    cuda_ok, cuda_txt = gpu_status()
+    print(f"[ECHO] {cuda_txt}")
+
+    rife = RifeInterpolator()          # telecharge les poids au premier lancement
+    print(f"[ECHO] {rife.status}")
+
+    cap = cv2.VideoCapture(CAM_INDEX)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAP_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAP_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, FPS)
+    if not cap.isOpened():
+        raise SystemExit("Impossible d'ouvrir la webcam (verifier CAM_INDEX).")
+
+    pose = mp.solutions.pose.Pose(model_complexity=1,
+                                  min_detection_confidence=0.5,
+                                  min_tracking_confidence=0.5)
+
+    buffer_s = BUFFER_SECONDS
+    st = Shared(int(buffer_s * FPS))
+    worker = threading.Thread(target=capture_thread, args=(cap, pose, st),
+                              daemon=True)
+    worker.start()
+
+    delay       = 0.0     # retard courant (s) par rapport au direct
+    stable_keys = None    # duree fixee par les touches 1..0 (prioritaire)
+    rife_on     = True    # touche I
+    fps_render  = 0.0
+    rife_cost   = 0.0     # cout d'une interpolation (s, moyenne mobile)
+    budget      = 1.0 / RENDER_FPS
+    prev_t      = time.monotonic()
+    n_frame     = 0
+
+    cv2.namedWindow(WIN_MAIN, cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty(WIN_MAIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    panel_create()
+
+    while st.running:
+        loop_start = time.monotonic()
+        now = loop_start
+        dt, prev_t = now - prev_t, now
+        fps_render = 0.9 * fps_render + 0.1 * (1.0 / dt if dt > 0 else 0.0)
+        n_frame += 1
+
+        d_stop, d_full, catchup, want_buffer_s, stable_panel = panel_read()
+        st.stable_secs = stable_keys if stable_keys is not None else float(stable_panel)
+        if want_buffer_s != buffer_s:
+            buffer_s = want_buffer_s
+            st.want_max_frames = int(buffer_s * FPS)   # applique par la capture
+
         # --- mise a jour du retard (secondes reelles) ---
+        distance = st.distance
         v = speed_for_distance(distance, delay, d_stop, d_full, catchup)
         delay += (1.0 - v) * dt
-        delay = max(0.0, min(delay, now - stamps[0]))
 
-        # --- image a afficher : celle capturee a (now - delay) ---
-        # (etape suivante : interpolation RIFE entre les deux voisines)
-        idx = bisect_left(stamps, now - delay)
-        out = buffer[min(idx, len(buffer) - 1)].copy()
+        # --- choix des deux images voisines de l'instant (now - delay) ---
+        with st.lock:
+            if not st.stamps:
+                if cv2.waitKey(20) & 0xFF in (ord('q'), ord('Q'), 27):
+                    break
+                continue
+            delay = max(0.0, min(delay, now - st.stamps[0]))
+            target = now - delay
+            idx = bisect_left(st.stamps, target)
+            idx = min(idx, len(st.stamps) - 1)
+            img_next, t_next = st.buffer[idx], st.stamps[idx]
+            if idx > 0:
+                img_prev, t_prev = st.buffer[idx - 1], st.stamps[idx - 1]
+            else:
+                img_prev, t_prev = img_next, t_next
+
+        # --- interpolation RIFE entre les deux voisines, a l'instant exact ---
+        # (coupee si trop lente pour tenir la cadence d'affichage ; nouvel
+        #  essai periodique pour re-mesurer son cout)
+        frac = (target - t_prev) / (t_next - t_prev) if t_next > t_prev else 1.0
+        used_rife = False
+        too_slow = rife_cost >= 0.75 * budget
+        if (rife_on and rife.ok and delay > 0.02 and 0.04 < frac < 0.96
+                and (not too_slow or n_frame % 90 == 0)):
+            t0 = time.monotonic()
+            out = rife.interpolate(img_prev, img_next, frac)
+            cost = time.monotonic() - t0
+            # apres une periode "trop lent", repartir de la mesure fraiche
+            rife_cost = cost if (rife_cost == 0.0 or too_slow) \
+                        else 0.8 * rife_cost + 0.2 * cost
+            used_rife = True
+        else:
+            out = img_prev if frac < 0.5 else img_next
         out = cv2.flip(out, 1)                  # effet miroir horizontal
 
         # --- overlays ---
-        if ref_width is None:
-            draw_text(out, f"Restez immobile {stable_secs:.0f}s (ou C) pour calibrer", 60)
+        if st.ref_width is None:
+            draw_text(out, f"Restez immobile {st.stable_secs:.0f}s (ou C) pour calibrer", 60)
         d_txt = f"{distance:.2f} m" if distance else "--"
+        if not rife.ok:
+            rife_txt, rife_ok = rife.status, False
+        elif not rife_on:
+            rife_txt, rife_ok = "RIFE coupe (touche I)", False
+        elif rife_cost >= 0.75 * budget:
+            rife_txt, rife_ok = "RIFE trop lent -> image la plus proche", False
+        else:
+            rife_txt = f"RIFE actif ({rife_cost * 1000:.0f} ms)" if used_rife \
+                       else "RIFE pret (direct : inutile)"
+            rife_ok = True
         panel_draw([
             (cuda_txt, cuda_ok),
+            (rife_txt, rife_ok),
             (f"Distance : {d_txt}", distance is not None),
             (f"Vitesse : {v:.2f}   Retard : {delay:.1f} s", True),
-            (f"Camera : {fps_meas:.0f} im/s", fps_meas > 20),
-            (f"Reference : {'calibree' if ref_width else 'en attente'}", ref_width is not None),
-            (f"Nouvelle ref apres {stable_secs:.0f} s immobile", True),
-            (f"Buffer : {len(buffer) / FPS:.0f} / {buffer_s} s", True),
-            ("Touches : C ref, 1..0 duree, Q quitter", True),
+            (f"Camera : {st.fps_cam:.0f} im/s   Rendu : {fps_render:.0f} im/s",
+             fps_render > RENDER_FPS - 3),
+            (f"Reference : {'calibree' if st.ref_width else 'en attente'}",
+             st.ref_width is not None),
+            (f"Nouvelle ref apres {st.stable_secs:.0f} s immobile", True),
+            (f"Buffer : {len(st.buffer) / FPS:.0f} / {buffer_s} s", True),
+            ("Touches : C ref, I interpolation, 1..0 duree, Q quitter", True),
         ])
         cv2.imshow(WIN_MAIN, out)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
+        # --- cadence d'affichage : RENDER_FPS minimum garanti ---
+        elapsed = time.monotonic() - loop_start
+        wait_ms = max(1, int((budget - elapsed) * 1000))
+        key = cv2.waitKey(wait_ms) & 0xFF
+        if key in (ord('q'), ord('Q'), 27):     # Q ou Echap
             break
-        if key == ord('c') and widths:
-            ref_width = float(np.mean(widths))
+        if cv2.getWindowProperty(WIN_MAIN, cv2.WND_PROP_VISIBLE) < 1:
+            break                               # fenetre fermee a la souris
+        if key == ord('i'):
+            rife_on = not rife_on
+        if key == ord('c'):
+            st.calib_request = True
             delay = 0.0
-            last_dist = None
-            anchor_w = None
         if ord('0') <= key <= ord('9'):         # duree d'immobilite : 1..9 s, 0 = 10 s
             stable_keys = 10.0 if key == ord('0') else float(key - ord('0'))
 
+    st.running = False
+    worker.join(timeout=2.0)
     cap.release()
     pose.close()
     cv2.destroyAllWindows()

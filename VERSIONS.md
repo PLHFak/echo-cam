@@ -6,6 +6,15 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.5 — 27-09-2026 · Interpolation RIFE + rendu 30 im/s garanti
+- Ralenti fluide : l'image affichée est interpolée par RIFE 4.9 (GPU) à
+  l'instant exact entre les deux images voisines du buffer. Touche **I**
+  pour couper/rétablir. Poids (~21 Mo) téléchargés au premier lancement.
+- Capture/analyse dans un thread ; affichage cadencé à **30 im/s minimum**
+  (si RIFE est trop lent, retour automatique à l'image la plus proche).
+- Panneau : état RIFE (coût en ms) et cadence de rendu affichés.
+- Quitter aussi avec **Échap** ou la croix de la fenêtre (en plus de Q).
+
 ## v1.4 — 27-09-2026 · Socle V2 : panneau de réglages + PyTorch CUDA
 - Panneau latéral « ECHO — Réglages » : curseurs seuils arrêt/direct,
   vitesse de rattrapage, profondeur du buffer (redimensionné en direct),

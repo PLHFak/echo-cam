@@ -40,7 +40,8 @@ cette position devient la nouvelle référence.
 | **1** à **9** | Durée d'immobilité avant nouvelle référence : 1 à 9 s |
 | **0** | Durée d'immobilité : 10 s |
 | **C** | Calibration manuelle : la position courante devient la référence (2 m) |
-| **Q** | Quitter |
+| **I** | Interpolation RIFE : couper / rétablir |
+| **Q** ou **Échap** | Quitter (cliquer d'abord sur la fenêtre vidéo) |
 
 Une variation de largeur d'épaules sous **±15 %** compte comme immobile
 (`STABLE_TOL` dans `main.py`).
@@ -56,8 +57,20 @@ Tout est en tête de `main.py` (clic droit → Ouvrir avec → Bloc-notes) :
 seuils de distance (`DIST_STOP`, `DIST_FULL`), vitesse de rattrapage,
 profondeur du buffer, lissage, délai avant retour au direct (`ABSENT_TIMEOUT`).
 
-## Prochaine étape (V2)
+## Interpolation RIFE (ralenti fluide)
 
-Remplacer le ré-affichage d'images par de l'interpolation **RIFE** pour un
-ralenti fluide (image à instant *t* entre deux frames). Nécessite un GPU —
-pour la 4K accélérée, un PC avec carte NVIDIA + TensorRT.
+En ralenti, l'image affichée est fabriquée par **RIFE** (GPU NVIDIA requis) :
+une image intermédiaire est calculée à l'instant exact entre les deux images
+voisines du buffer, au lieu de répéter la plus proche. L'affichage est cadencé
+à **30 images/s minimum**, indépendamment de la caméra.
+
+- Les poids du modèle (~21 Mo) sont téléchargés automatiquement au premier
+  lancement dans `models/`.
+- Sans GPU CUDA, le programme fonctionne normalement, sans interpolation
+  (l'état est affiché dans le panneau de réglages).
+- Si l'interpolation est trop lente pour tenir 30 im/s, elle est coupée
+  automatiquement (et retentée périodiquement) — la cadence prime.
+
+## Prochaine étape
+
+Fond virtuel (touche V) ; pour la 4K accélérée, TensorRT.
