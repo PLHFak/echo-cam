@@ -27,3 +27,6 @@ Thumbs.db
 
 # Resultat du diagnostic (propre a chaque machine)
 diagnostic.txt
+
+# Journal de debug (propre a chaque machine)
+echo_debug.log

@@ -1,18 +1,15 @@
-"""Architecture IFNet de RIFE (interpolation d'images).
-Copie adaptee (licence MIT) de Fannovel16/ComfyUI-Frame-Interpolation
-(vfi_models/rife/rife_arch.py), elle-meme issue de hzwer/Practical-RIFE.
-Rendue autonome : dependances ComfyUI retirees, device auto (CUDA sinon CPU).
 """
-"""
-26-Dez-21
+Architecture IFNet de RIFE (versions 4.0 a 4.26) — inference uniquement.
+
+Reprise de ComfyUI-Frame-Interpolation (MIT, Fannovel16), elle-meme issue de :
 https://github.com/hzwer/Practical-RIFE
 https://github.com/hzwer/Practical-RIFE/blob/main/model/warplayer.py
 https://github.com/HolyWu/vs-rife/blob/master/vsrife/__init__.py
+Seule modification : le choix du device (plus de dependance ComfyUI).
 """
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import warnings
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 backwarp_tenGrid = {}

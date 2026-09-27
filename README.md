@@ -40,8 +40,9 @@ cette position devient la nouvelle référence.
 | **1** à **9** | Durée d'immobilité avant nouvelle référence : 1 à 9 s |
 | **0** | Durée d'immobilité : 10 s |
 | **C** | Calibration manuelle : la position courante devient la référence (2 m) |
-| **I** | Interpolation RIFE on/off (ralenti fluide, GPU) |
-| **Q** | Quitter |
+| **I** | Interpolation RIFE : couper / rétablir |
+| **R** | Remettre tous les curseurs aux valeurs par défaut |
+| **Q** ou **Échap** | Quitter (cliquer d'abord sur la fenêtre vidéo) |
 
 Une variation de largeur d'épaules sous **±15 %** compte comme immobile
 (`STABLE_TOL` dans `main.py`).
@@ -51,14 +52,44 @@ Une variation de largeur d'épaules sous **±15 %** compte comme immobile
 Double-cliquez sur **mettre_a_jour.bat** : la dernière version est téléchargée
 depuis GitHub, sans réinstallation.
 
-## Réglages
+## Réglages (panneau « ECHO — Réglages »)
 
-Tout est en tête de `main.py` (clic droit → Ouvrir avec → Bloc-notes) :
-seuils de distance (`DIST_STOP`, `DIST_FULL`), vitesse de rattrapage,
-profondeur du buffer, lissage, délai avant retour au direct (`ABSENT_TIMEOUT`).
+Chaque curseur est expliqué directement dans le panneau, avec sa valeur par
+défaut entre parenthèses. La touche **R** remet tout aux valeurs par défaut.
 
-## Prochaine étape (V2)
+| Curseur | Défaut | Ce qu'il fait |
+|---|---|---|
+| **Arrêt (cm)** | 50 | Plus près que cette distance, l'image se fige. |
+| **Direct (cm)** | 200 | Plus loin, lecture en direct (ou rattrapage). Entre Arrêt et Direct : ralenti progressif. |
+| **Rattrapage x10** | 25 (= x2,5) | Vitesse de la lecture quand elle rattrape le direct en reculant. |
+| **Buffer (s)** | 12 | Mémoire d'images : c'est le retard maximum possible. 12 s en 720p ≈ 1 Go de RAM. |
+| **Immobilité (s)** | 10 | Durée sans bouger avant que la position devienne la nouvelle référence (touches 1..9, 0 en direct). |
 
-Remplacer le ré-affichage d'images par de l'interpolation **RIFE** pour un
-ralenti fluide (image à instant *t* entre deux frames). Nécessite un GPU —
-pour la 4K accélérée, un PC avec carte NVIDIA + TensorRT.
+Les réglages plus fins (lissage, délai salle vide `ABSENT_TIMEOUT`, tolérance
+d'immobilité) restent en tête de `main.py`.
+
+## Debug (continuité du flux)
+
+Le panneau affiche une ligne **Anomalies** : `cam` = images caméra manquantes,
+`retard` = cycles d'affichage au-delà des 33 ms, `saut` = discontinuités dans
+la lecture (le plus souvent : buffer trop court pour le retard demandé).
+Le détail est journalisé dans la console et dans `echo_debug.log` — à
+m'envoyer si quelque chose semble saccadé.
+
+## Interpolation RIFE (ralenti fluide)
+
+En ralenti, l'image affichée est fabriquée par **RIFE** (GPU NVIDIA requis) :
+une image intermédiaire est calculée à l'instant exact entre les deux images
+voisines du buffer, au lieu de répéter la plus proche. L'affichage est cadencé
+à **30 images/s minimum**, indépendamment de la caméra.
+
+- Les poids du modèle (~21 Mo) sont téléchargés automatiquement au premier
+  lancement dans `models/`.
+- Sans GPU CUDA, le programme fonctionne normalement, sans interpolation
+  (l'état est affiché dans le panneau de réglages).
+- Si l'interpolation est trop lente pour tenir 30 im/s, elle est coupée
+  automatiquement (et retentée périodiquement) — la cadence prime.
+
+## Prochaine étape
+
+Fond virtuel (touche V) ; pour la 4K accélérée, TensorRT.

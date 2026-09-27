@@ -6,6 +6,20 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.6 — 27-09-2026 · Rendu 30 im/s garanti, réglages expliqués, debug
+- Refonte : capture et analyse dans un thread ; affichage cadencé à
+  **30 im/s minimum**. Si RIFE dépasse le budget de 33 ms, il est coupé
+  automatiquement (et retenté périodiquement) — la cadence prime.
+- Poids RIFE (rife49.pth, ~21 Mo, empreinte sha256 vérifiée) téléchargés
+  par le programme dans `models/` — plus de téléchargement dans
+  `lancer.bat` ; `rife.py`/rife47.pth remplacés par `rife_interp.py`.
+- Panneau : une ligne d'explication par curseur avec sa valeur par défaut ;
+  touche **R** = remise aux valeurs par défaut ; C/I/R aussi en majuscule.
+- Debug : compteurs d'anomalies dans le panneau (images caméra manquantes,
+  cycles d'affichage trop longs, sauts de continuité de lecture), détail
+  journalisé dans la console et `echo_debug.log`.
+- Quitter aussi avec **Échap** ou la croix de la fenêtre (en plus de Q).
+
 ## v1.5 — 27-09-2026 · Ralenti fluide (interpolation RIFE)
 - Interpolation RIFE v4.7 sur GPU (fp16) entre les deux images qui encadrent
   le retard : le ralenti profond devient fluide. Touche **I** = on/off
