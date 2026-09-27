@@ -6,6 +6,14 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.6 — 27-09-2026 · Réglages expliqués + debug de continuité
+- Panneau : une ligne d'explication par curseur avec sa valeur par défaut ;
+  touche **R** pour remettre tous les curseurs aux valeurs par défaut.
+- Debug : compteur d'anomalies dans le panneau (images caméra manquantes,
+  cycles d'affichage trop longs, sauts de continuité de lecture), détail
+  journalisé dans la console et `echo_debug.log`.
+- Touches C, I, R acceptées aussi en majuscule.
+
 ## v1.5 — 27-09-2026 · Interpolation RIFE + rendu 30 im/s garanti
 - Ralenti fluide : l'image affichée est interpolée par RIFE 4.9 (GPU) à
   l'instant exact entre les deux images voisines du buffer. Touche **I**
