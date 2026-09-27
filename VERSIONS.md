@@ -6,6 +6,19 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.10 — 27-09-2026 · Spec V1 de l'architecte : 3 zones, HUD, versions baptisées
+- **Trois zones** : figé (< 0,5 m, hystérésis 10 cm) · ralenti 0→1 (0,5→2 m) ·
+  accélération progressive 1→Vmax (2→3 m) · rattrapage plein (> 3 m).
+  **Double lissage** distance + vitesse : transitions sans à-coup.
+- **HUD incrusté** (touche **H** : complet / vitesse seule / aucun) : état,
+  vitesse, retard, distance, version active, device GPU/CPU, im/s réels,
+  résolution de traitement, état RIFE — coins arrondis, fond translucide.
+- **Versions baptisées** : **S** sauvegarde les réglages sous un nom
+  (`presets.json`, persistant), **←/→** bascule avec reset propre du run,
+  liste dans le panneau. Touche **P** : masquer le panneau.
+- Écart assumé avec la spec : RIFE reste actif à v=1 (demande PLH : 60
+  images à l'écran même quand la caméra n'en donne que 30).
+
 ## v1.9.1 — 27-09-2026 · Preuve d'exécution GPU mesurée
 - Au démarrage, ligne « verif GPU » dans `echo_debug.log` : device du
   modèle, nom de la carte, fp16, warm-up chronométré (synchronisé CUDA)

@@ -1,30 +1,37 @@
 """
-Projet ECHO — Jouer avec le temps (V2 : interpolation RIFE)
+Projet ECHO — Jouer avec le temps (spec V1 de l'architecte)
 -----------------------------------------------------------
-La webcam filme la personne. Plus elle s'approche de l'ecran, plus la lecture
-ralentit ; tout pres, l'image se fige. Quand elle recule, la lecture reprend
-puis accelere pour rattraper le direct. Immobile N secondes : la position
-courante devient la reference 0 (lecture en direct).
+La webcam filme la personne ; sa distance a l'ecran pilote la vitesse de
+lecture, en TROIS zones :
+  d <= Arret (0,5 m)          -> FIGE          (v = 0)
+  Arret  < d < Direct (2 m)   -> RALENTI       (v de 0 a 1, lineaire)
+  Direct < d < Accel (3 m)    -> ACCELERATION  (v de 1 a Vmax, lineaire)
+  d >= Accel                  -> rattrapage plein (v = Vmax)
+Le retard se resorbe tant que v > 1 ; a zero, la lecture reste en direct.
+Transitions douces : la distance ET la vitesse sont lissees (double lissage),
+avec hysteresis anti-oscillation au seuil de gel.
 
-V2 : la capture et l'analyse tournent dans un thread ; l'affichage est cadence
-a 60 images/s (ecran 60 Hz), independamment de la camera (30 im/s). L'image
-affichee est fabriquee en permanence par RIFE (interpolation GPU) entre les
-deux images voisines du buffer — en ralenti comme en direct : la camera donne
-30 im/s, l'ecran recoit 60. Touche I pour couper/retablir RIFE.
-Pour toujours avoir deux images autour de l'instant affiche, la lecture vit
-avec une micro-latence fixe de ~50 ms (LIVE_LATENCY), imperceptible.
+L'affichage est cadence a 60 im/s (ecran 60 Hz), independamment de la camera
+(30 im/s) : chaque image affichee est interpolee par RIFE (GPU) a l'instant
+exact entre les deux images voisines du buffer — en ralenti comme en direct.
+(Ecart assume avec la spec : RIFE reste actif a v = 1, demande explicite de
+PLH — 60 images a l'ecran meme quand la camera n'en donne que 30.)
 
-Dependances : voir requirements.txt (mediapipe 0.10.21, torch cu124, Py 3.11/3.12)
-Lancer :      double-clic sur lancer.bat (Windows) ou python main.py
-Touches :     C = calibrer   |   I = interpolation RIFE on/off
-              R = reglages par defaut   |   1..9, 0 = duree d'immobilite
-              Q ou Echap = quitter
+Touches : C calibrer | I interpolation | H mode HUD (complet/vitesse/aucun)
+          S sauvegarder la version courante (taper le nom, Entree)
+          fleches gauche/droite : version precedente / suivante
+          P panneau de reglages | R valeurs par defaut
+          1..9, 0 duree d'immobilite | Q ou Echap quitter
 
-Debug : les anomalies de flux (images camera manquantes, cycles d'affichage
-trop longs, sauts dans la continuite de lecture) sont comptees dans le
-panneau et journalisees dans la console + echo_debug.log.
+Versions baptisees : presets.json (les reglages nommes survivent au
+redemarrage) ; charger une version remet le run a zero proprement.
+
+Debug : anomalies + bilan de perf toutes les 5 s dans echo_debug.log.
+Dependances : requirements.txt (mediapipe 0.10.21, torch cu124, Py 3.11/3.12).
+Lancer : double-clic sur lancer.bat (Windows) ou python main.py.
 """
 
+import json
 import threading
 import time
 from bisect import bisect_left
@@ -36,10 +43,10 @@ import mediapipe as mp
 
 from rife_interp import RifeInterpolator
 
-ECHO_VERSION   = "1.9.1"
+ECHO_VERSION   = "1.10"
 
 # ---------------------------------------------------------------------------
-# Parametres par defaut (modifiables en direct via le panneau de reglages)
+# Parametres par defaut (modifiables en direct via le panneau, touche P)
 # ---------------------------------------------------------------------------
 CAM_INDEX      = 0        # 0 = webcam par defaut
 CAP_WIDTH      = 1280
@@ -49,14 +56,16 @@ FPS            = 30       # cadence camera, sert au dimensionnement du buffer
 RENDER_FPS     = 60       # cadence d'affichage : ecran 60 Hz (la camera, elle,
                           # reste a 30 im/s ; RIFE fabrique les images entre)
 LIVE_LATENCY   = 1.5 / FPS  # ~50 ms de latence fixe pour toujours avoir deux
-                            # images autour de l'instant affiche (interpolation
-                            # possible meme en direct)
+                            # images autour de l'instant affiche
 
 DIST_STOP      = 0.5      # m — en dessous, image figee
-DIST_FULL      = 2.0      # m — au dessus, direct / rattrapage
-CATCHUP_SPEED  = 2.5      # vitesse de rattrapage du direct
+DIST_FULL      = 2.0      # m — en phase (v = 1)
+DIST_ACCEL     = 3.0      # m — rattrapage plein (v = Vmax)
+VMAX           = 2.5      # vitesse max de rattrapage
 BUFFER_SECONDS = 12       # profondeur memoire (12 s * 30 fps * 720p ~ 1 Go RAM)
 SMOOTH_WINDOW  = 8        # lissage de la distance (nb de mesures)
+SMOOTH_SPEED   = 0.15     # lissage de la vitesse (0 = fige, 1 = instantane)
+HYSTERESIS     = 0.1      # m — anti-oscillation au seuil de gel
 
 ANALYZE_EVERY  = 3        # analyse de posture 1 image camera sur 3 (~10 Hz) :
 ANALYZE_WIDTH  = 640      # sur image reduite. L'analyse ne sert qu'a estimer
@@ -73,6 +82,13 @@ CALIB_DISTANCE = 2.0      # distance (m) de la calibration manuelle (touche C)
 WIN_MAIN  = "ECHO"
 WIN_PANEL = "ECHO - Reglages"
 
+PRESETS_FILE = "presets.json"
+HUD_MODES    = ("complet", "vitesse", "aucun")
+
+# fleches gauche/droite (codes waitKeyEx Windows, puis Linux pour les tests)
+KEYS_LEFT  = (2424832, 65361)
+KEYS_RIGHT = (2555904, 65363)
+
 # ---------------------------------------------------------------------------
 # Etat GPU (PyTorch/CUDA) — verifie une fois au demarrage
 # ---------------------------------------------------------------------------
@@ -87,14 +103,19 @@ def gpu_status():
 
 
 # ---------------------------------------------------------------------------
-def speed_for_distance(d, delay, d_stop, d_full, catchup):
-    """Vitesse de lecture v selon la distance d et le retard courant (s).
-    d = None signifie : pas de calibration ou salle vide -> retour au direct."""
-    if d is None or d >= d_full:
-        return catchup if delay > 0 else 1.0
-    if d <= d_stop:
+def speed_target(d, p):
+    """Vitesse cible selon les trois zones de distance (sans lissage).
+    d = None signifie : pas de calibration ou salle vide -> rattrapage plein
+    (une fois le retard a zero, la lecture reste simplement en direct)."""
+    if d is None:
+        return p["vmax"]
+    if d <= p["stop"]:
         return 0.0
-    return (d - d_stop) / (d_full - d_stop)                # varie de 0 a 1
+    if d < p["full"]:
+        return (d - p["stop"]) / (p["full"] - p["stop"])
+    if d < p["accel"]:
+        return 1.0 + (d - p["full"]) / (p["accel"] - p["full"]) * (p["vmax"] - 1.0)
+    return p["vmax"]
 
 
 def shoulder_width_px(landmarks, w, h):
@@ -106,9 +127,8 @@ def shoulder_width_px(landmarks, w, h):
 
 
 # ---------------------------------------------------------------------------
-# Debug : anomalies de flux (images perdues, retards de rendu, sauts)
-# journalisees dans la console et dans echo_debug.log, au plus une ligne
-# par categorie et par seconde (les compteurs, eux, comptent tout).
+# Debug : anomalies de flux et bilans de performance dans echo_debug.log
+# (au plus une ligne par categorie et par seconde ; les compteurs comptent tout)
 # ---------------------------------------------------------------------------
 DEBUG_LOG  = "echo_debug.log"
 _dbg_lock  = threading.Lock()
@@ -129,65 +149,96 @@ def debug_log(cat, msg, every=1.0):
         pass
 
 
-def draw_text(img, text, y, scale=0.9):
-    cv2.putText(img, text, (30, y), cv2.FONT_HERSHEY_SIMPLEX,
-                scale, (0, 0, 0), 4, cv2.LINE_AA)
-    cv2.putText(img, text, (30, y), cv2.FONT_HERSHEY_SIMPLEX,
-                scale, (255, 255, 255), 2, cv2.LINE_AA)
+# ---------------------------------------------------------------------------
+# Versions baptisees (presets nommes, persistes dans presets.json)
+# ---------------------------------------------------------------------------
+def presets_load():
+    try:
+        with open(PRESETS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): v for k, v in data.items() if isinstance(v, dict)}
+    except (OSError, ValueError):
+        return {}
+
+
+def presets_save(presets):
+    try:
+        with open(PRESETS_FILE, "w", encoding="utf-8") as f:
+            json.dump(presets, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        debug_log("presets", f"sauvegarde impossible : {e}")
 
 
 # ---------------------------------------------------------------------------
-# Panneau lateral de reglages
+# Panneau lateral de reglages (touche P pour le masquer / afficher)
 # ---------------------------------------------------------------------------
 # curseur -> (valeur par defaut, maximum)
 PANEL_DEFAULTS = {
-    "Arret (cm)":     (int(DIST_STOP * 100),     300),
-    "Direct (cm)":    (int(DIST_FULL * 100),     500),
-    "Rattrapage x10": (int(CATCHUP_SPEED * 10),  60),
-    "Buffer (s)":     (BUFFER_SECONDS,           60),
-    "Immobilite (s)": (int(STABLE_SECONDS),      30),
+    "Arret (cm)":       (int(DIST_STOP * 100),   300),
+    "Direct (cm)":      (int(DIST_FULL * 100),   500),
+    "Accel (cm)":       (int(DIST_ACCEL * 100),  600),
+    "Vmax x10":         (int(VMAX * 10),         60),
+    "Buffer (s)":       (BUFFER_SECONDS,         60),
+    "Lissage dist":     (SMOOTH_WINDOW,          30),
+    "Lissage vit x100": (int(SMOOTH_SPEED * 100), 100),
+    "Hysteresis (cm)":  (int(HYSTERESIS * 100),  50),
+    "Immobilite (s)":   (int(STABLE_SECONDS),    30),
 }
 
-# une ligne d'explication par curseur (defaut rappele entre parentheses)
 PANEL_HELP = [
-    "Curseurs — R = remettre les valeurs par defaut",
-    "Arret (50 cm) : plus pres, l'image se fige",
-    "Direct (200 cm) : plus loin, retour au direct",
-    "  entre Arret et Direct : ralenti progressif",
-    "Rattrapage (x2.5) : vitesse de retour au direct",
+    "Curseurs — R = defauts, P = masquer, S = sauver version",
+    "Arret (50) : plus pres, FIGE",
+    "Direct (200) : EN PHASE (v=1) ; entre les 2 : RALENTI",
+    "Accel (300) : v monte de 1 a Vmax entre Direct et Accel",
+    "Vmax (x2.5) : vitesse de rattrapage plein",
     "Buffer (12 s) : memoire d'images = retard maxi",
+    "Lissage dist (8) / vit (0.15) : transitions douces",
+    "Hysteresis (10 cm) : anti-oscillation au seuil FIGE",
     "Immobilite (10 s) : duree avant nouvelle reference",
 ]
 
 
 def panel_create():
     cv2.namedWindow(WIN_PANEL, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(WIN_PANEL, 470, 760)
+    cv2.resizeWindow(WIN_PANEL, 470, 900)
     nop = lambda v: None
     for nom, (defaut, maxi) in PANEL_DEFAULTS.items():
         cv2.createTrackbar(nom, WIN_PANEL, defaut, maxi, nop)
 
 
-def panel_reset():
-    """Touche R : remet tous les curseurs aux valeurs par defaut."""
-    for nom, (defaut, _) in PANEL_DEFAULTS.items():
-        cv2.setTrackbarPos(nom, WIN_PANEL, defaut)
+def panel_positions():
+    return {n: cv2.getTrackbarPos(n, WIN_PANEL) for n in PANEL_DEFAULTS}
 
 
-def panel_read():
-    """Lit les curseurs ; retourne (d_stop, d_full, catchup, buffer_s, stable_s)."""
-    d_stop   = max(10, cv2.getTrackbarPos("Arret (cm)",  WIN_PANEL)) / 100.0
-    d_full   = max(20, cv2.getTrackbarPos("Direct (cm)", WIN_PANEL)) / 100.0
-    if d_full <= d_stop:
-        d_full = d_stop + 0.1
-    catchup  = max(11, cv2.getTrackbarPos("Rattrapage x10", WIN_PANEL)) / 10.0
-    buffer_s = max(2,  cv2.getTrackbarPos("Buffer (s)",     WIN_PANEL))
-    stable_s = max(1,  cv2.getTrackbarPos("Immobilite (s)", WIN_PANEL))
-    return d_stop, d_full, catchup, buffer_s, stable_s
+def panel_apply(vals):
+    for n, v in vals.items():
+        if n in PANEL_DEFAULTS:
+            maxi = PANEL_DEFAULTS[n][1]
+            cv2.setTrackbarPos(n, WIN_PANEL, min(int(v), maxi))
+
+
+def params_from_positions(g):
+    """Positions brutes des curseurs -> parametres physiques coherents."""
+    p = {
+        "stop":         max(10, g["Arret (cm)"]) / 100.0,
+        "full":         max(20, g["Direct (cm)"]) / 100.0,
+        "accel":        max(30, g["Accel (cm)"]) / 100.0,
+        "vmax":         max(10, g["Vmax x10"]) / 10.0,
+        "buffer_s":     max(2,  g["Buffer (s)"]),
+        "smooth_win":   max(1,  g["Lissage dist"]),
+        "smooth_speed": max(1,  g["Lissage vit x100"]) / 100.0,
+        "hyst":         g["Hysteresis (cm)"] / 100.0,
+        "stable_s":     max(1,  g["Immobilite (s)"]),
+    }
+    if p["full"] <= p["stop"]:
+        p["full"] = p["stop"] + 0.1
+    if p["accel"] <= p["full"]:
+        p["accel"] = p["full"] + 0.1
+    return p
 
 
 def panel_draw(lines):
-    img = np.full((300 + 26 * len(PANEL_HELP), 470, 3), 30, np.uint8)
+    img = np.full((320 + 26 * len(PANEL_HELP), 470, 3), 30, np.uint8)
     for i, (txt, ok) in enumerate(lines):
         color = (120, 255, 120) if ok else (120, 120, 255)
         cv2.putText(img, txt, (15, 35 + 30 * i), cv2.FONT_HERSHEY_SIMPLEX,
@@ -202,6 +253,67 @@ def panel_draw(lines):
 
 
 # ---------------------------------------------------------------------------
+# HUD incruste dans l'image (touche H : complet / vitesse / aucun)
+# ---------------------------------------------------------------------------
+ETAT_COLORS = {
+    "FIGE":         (70, 70, 255),
+    "RALENTI":      (0, 190, 255),
+    "EN PHASE":     (120, 255, 120),
+    "ACCELERATION": (255, 190, 80),
+}
+
+
+def rounded_box(img, x1, y1, x2, y2, r=16, color=(24, 24, 24), alpha=0.55):
+    """Rectangle a coins arrondis, fond translucide."""
+    over = img.copy()
+    cv2.rectangle(over, (x1 + r, y1), (x2 - r, y2), color, -1)
+    cv2.rectangle(over, (x1, y1 + r), (x2, y2 - r), color, -1)
+    for cx, cy in ((x1 + r, y1 + r), (x2 - r, y1 + r),
+                   (x1 + r, y2 - r), (x2 - r, y2 - r)):
+        cv2.circle(over, (cx, cy), r, color, -1)
+    cv2.addWeighted(over, alpha, img, 1 - alpha, 0, img)
+
+
+def hud_text(img, txt, x, y, scale, color=(235, 235, 235), thick=1):
+    cv2.putText(img, txt, (x, y), cv2.FONT_HERSHEY_DUPLEX,
+                scale, color, thick, cv2.LINE_AA)
+
+
+def hud_draw(img, mode, info):
+    """info : dict etat, v, retard, distance, version, device, fps_r, fps_c,
+    rife, naming (None ou texte en cours de frappe)."""
+    if info.get("naming") is not None:
+        h = img.shape[0]
+        rounded_box(img, 24, h - 96, 760, h - 24)
+        hud_text(img, f"Nouvelle version : {info['naming']}_", 44, h - 52, 0.9)
+        hud_text(img, "Entree = sauver   Echap = annuler", 44, h - 32, 0.5,
+                 (170, 170, 170))
+    if mode == "aucun":
+        return
+    if mode == "vitesse":
+        rounded_box(img, 24, 24, 240, 92)
+        hud_text(img, f"x{info['v']:.2f}", 44, 74, 1.5,
+                 ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
+        return
+    # mode complet
+    rounded_box(img, 24, 24, 470, 268)
+    hud_text(img, info["etat"], 44, 66, 1.0,
+             ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
+    d_txt = f"{info['distance']:.2f} m" if info["distance"] else "--"
+    lignes = [
+        f"vitesse   x{info['v']:.2f}",
+        f"retard    {info['retard']:5.1f} s",
+        f"distance  {d_txt}",
+        f"version   {info['version']}",
+        f"{info['device']}   {info['fps_r']:.0f}/{info['fps_c']:.0f} im/s"
+        f"   {CAP_WIDTH}x{CAP_HEIGHT}",
+        info["rife"],
+    ]
+    for i, txt in enumerate(lignes):
+        hud_text(img, txt, 44, 102 + 28 * i, 0.62)
+
+
+# ---------------------------------------------------------------------------
 # Etat partage entre le thread de capture/analyse et la boucle d'affichage
 # ---------------------------------------------------------------------------
 class Shared:
@@ -213,7 +325,8 @@ class Shared:
         self.distance   = None      # derniere distance estimee (m)
         self.ref_width  = None      # largeur d'epaules de reference
         self.fps_cam    = 0.0       # cadence camera mesuree
-        self.stable_secs = STABLE_SECONDS   # ecrit par l'affichage (touches/panneau)
+        self.stable_secs = STABLE_SECONDS   # ecrit par l'affichage
+        self.smooth_window = SMOOTH_WINDOW  # lissage distance (curseur)
         self.want_max_frames = max_frames   # redimensionnement demande du buffer
         self.calib_request   = False        # touche C
         self.cam_drops       = 0            # images camera manquantes (debug)
@@ -223,8 +336,8 @@ class Shared:
 def capture_thread(cap, pose, st):
     """Capture + detection de posture + estimation de distance, a la cadence
     de la camera. L'affichage tourne dans la boucle principale, a part."""
-    widths       = deque(maxlen=SMOOTH_WINDOW)
-    anchor_w     = None    # largeur d'epaules au debut de la periode d'immobilite
+    widths       = deque(maxlen=30)     # fenetre de lissage max (curseur)
+    anchor_w     = None    # largeur d'epaules au debut de l'immobilite
     stable_since = 0.0
     last_dist    = None
     last_seen    = 0.0
@@ -232,6 +345,10 @@ def capture_thread(cap, pose, st):
     prev_t       = start_t
     fps_meas     = 0.0
     n_cap        = 0
+
+    def moyenne():
+        k = max(1, int(st.smooth_window))
+        return float(np.mean(list(widths)[-k:]))
 
     while st.running:
         ok, frame = cap.read()
@@ -262,7 +379,7 @@ def capture_thread(cap, pose, st):
         if st.calib_request:
             st.calib_request = False
             if widths:
-                st.ref_width = float(np.mean(widths))
+                st.ref_width = moyenne()
                 anchor_w, last_dist = None, None
 
         # --- analyse de posture : 1 image sur ANALYZE_EVERY, en reduit ---
@@ -282,9 +399,9 @@ def capture_thread(cap, pose, st):
             sw = shoulder_width_px(res.pose_landmarks.landmark, ws, hs)
             if sw:
                 widths.append(sw)
-                sw_smooth = float(np.mean(widths))
+                sw_smooth = moyenne()
 
-                # immobile depuis stable_secs (±STABLE_TOL) ? -> nouvelle reference
+                # immobile depuis stable_secs (±STABLE_TOL) ? -> nouvelle ref
                 if anchor_w is None or abs(sw_smooth - anchor_w) > STABLE_TOL * anchor_w:
                     anchor_w, stable_since = sw_smooth, now
                 elif now - stable_since >= st.stable_secs:
@@ -312,7 +429,6 @@ def main():
     print(f"[ECHO] {cuda_txt}")
 
     # telecharge les poids au premier lancement ; warm-up a la taille reelle
-    # pour que la premiere interpolation soit deja dans le budget des 16,7 ms
     rife = RifeInterpolator(warmup_size=(CAP_HEIGHT, CAP_WIDTH))
     print(f"[ECHO] {rife.status}")
     debug_log("config", f"ECHO v{ECHO_VERSION} | {cuda_txt} | {rife.status} | "
@@ -333,38 +449,70 @@ def main():
                                   min_detection_confidence=0.5,
                                   min_tracking_confidence=0.5)
 
-    buffer_s = BUFFER_SECONDS
-    st = Shared(int(buffer_s * FPS))
+    st = Shared(int(BUFFER_SECONDS * FPS))
     worker = threading.Thread(target=capture_thread, args=(cap, pose, st),
                               daemon=True)
     worker.start()
 
-    delay       = 0.0     # retard courant (s) par rapport au direct
-    stable_keys = None    # duree fixee par les touches 1..0 (prioritaire)
-    rife_on     = True    # touche I
+    delay       = 0.0       # retard courant (s) par rapport au direct
+    v_smooth    = 1.0       # vitesse lissee (double lissage, spec §1)
+    frozen      = False     # etat FIGE avec hysteresis
+    stable_keys = None      # duree fixee par les touches 1..0 (prioritaire)
+    rife_on     = True      # touche I
+    hud_mode    = 0         # index dans HUD_MODES (touche H)
+    naming      = None      # texte en cours de frappe (touche S), sinon None
     fps_render  = 0.0
     budget      = 1.0 / RENDER_FPS
-    # RIFE par paliers : pleine resolution -> demi-resolution (~4x moins
-    # cher, toujours fluide) -> coupe. Remontee re-essayee periodiquement.
+    # RIFE par paliers : pleine res -> demi-res (~4x moins cher) -> coupe
     rife_mode   = "pleine"
     rife_costs  = {"pleine": 0.0, "demi": 0.0}   # moyennes mobiles (s)
     rife_budget = 0.85 * budget   # le reste du cycle coute ~2 ms
     prev_t      = time.monotonic()
     n_frame     = 0
-    late        = 0       # debug : cycles d'affichage au dela du budget
-    jumps       = 0       # debug : sauts dans la continuite de lecture
-    prev_target = None    # instant de lecture affiche au cycle precedent
+    late        = 0         # debug : cycles d'affichage au dela du budget
+    jumps       = 0         # debug : sauts dans la continuite de lecture
+    prev_target = None
 
-    # accumulateurs du bilan de performance (une ligne toutes les 5 s dans
-    # echo_debug.log : ou part le temps de chaque cycle d'affichage)
+    # versions baptisees
+    presets       = presets_load()
+    active_preset = None
+
+    # accumulateurs du bilan de performance (ligne perf toutes les 5 s)
     acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0, autre=0.0,
                rife_ms=0.0, rife_n=0, n=0)
     last_perf = time.monotonic()
-    t_wait_prev = None    # fin du waitKey precedent (mesure du temps "autre")
+    t_wait_prev = None
 
     cv2.namedWindow(WIN_MAIN, cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty(WIN_MAIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     panel_create()
+    panel_visible = True
+    saved_positions = panel_positions()
+    p = params_from_positions(saved_positions)
+    buffer_s = p["buffer_s"]
+
+    def reset_run():
+        """Charger une version = repartir proprement (spec §4)."""
+        nonlocal delay, v_smooth, frozen, prev_target, rife_mode, rife_costs
+        with st.lock:
+            st.buffer.clear()
+            st.stamps.clear()
+        delay, v_smooth, frozen = 0.0, 1.0, False
+        prev_target = None
+        rife_mode, rife_costs = "pleine", {"pleine": 0.0, "demi": 0.0}
+
+    def charger_version(nom):
+        nonlocal active_preset, saved_positions
+        vals = presets.get(nom)
+        if vals is None:
+            return
+        if panel_visible:
+            panel_apply(vals)
+        saved_positions = {n: int(vals.get(n, d)) for n, (d, _) in
+                           PANEL_DEFAULTS.items()}
+        active_preset = nom
+        reset_run()
+        debug_log("presets", f"version '{nom}' chargee")
 
     while st.running:
         loop_start = time.monotonic()
@@ -379,18 +527,28 @@ def main():
             debug_log("rendu", f"cycle de {dt * 1000:.0f} ms (budget "
                                f"{budget * 1000:.0f} ms, total {late})")
 
-        d_stop, d_full, catchup, want_buffer_s, stable_panel = panel_read()
-        st.stable_secs = stable_keys if stable_keys is not None else float(stable_panel)
-        if want_buffer_s != buffer_s:
-            buffer_s = want_buffer_s
+        if panel_visible:
+            saved_positions = panel_positions()
+        p = params_from_positions(saved_positions)
+        st.stable_secs = stable_keys if stable_keys is not None else float(p["stable_s"])
+        st.smooth_window = p["smooth_win"]
+        if p["buffer_s"] != buffer_s:
+            buffer_s = p["buffer_s"]
             st.want_max_frames = int(buffer_s * FPS)   # applique par la capture
 
-        # --- mise a jour du retard (secondes reelles) ---
+        # --- vitesse cible (3 zones) + gel avec hysteresis + double lissage ---
         distance = st.distance
-        v = speed_for_distance(distance, delay, d_stop, d_full, catchup)
-        delay += (1.0 - v) * dt
+        if distance is None:
+            frozen = False
+        elif frozen:
+            frozen = distance <= p["stop"] + p["hyst"]
+        else:
+            frozen = distance <= p["stop"]
+        v_cible = 0.0 if frozen else speed_target(distance, p)
+        v_smooth += (v_cible - v_smooth) * p["smooth_speed"]
+        delay += (1.0 - v_smooth) * dt
 
-        # --- choix des deux images voisines de l'instant (now - delay) ---
+        # --- choix des deux images voisines de l'instant affiche ---
         with st.lock:
             if not st.stamps:
                 if cv2.waitKey(20) & 0xFF in (ord('q'), ord('Q'), 27):
@@ -400,15 +558,13 @@ def main():
             target = now - LIVE_LATENCY - delay
 
             # --- debug : saut dans la continuite de lecture ---
-            # sans a-coup, l'instant affiche avance exactement de v*dt ;
-            # un ecart = clamp du retard (buffer trop court, transition direct)
             if prev_target is not None and n_frame > 30:
-                saut, attendu = target - prev_target, v * dt
+                saut, attendu = target - prev_target, v_smooth * dt
                 if saut < -0.005 or abs(saut - attendu) > 2.0 / FPS:
                     jumps += 1
                     debug_log("continuite",
                               f"saut de {saut * 1000:+.0f} ms (attendu "
-                              f"{attendu * 1000:.0f} ms, vitesse {v:.2f}, "
+                              f"{attendu * 1000:.0f} ms, vitesse {v_smooth:.2f}, "
                               f"retard {delay:.2f} s, total {jumps})")
             prev_target = target
             idx = bisect_left(st.stamps, target)
@@ -422,18 +578,16 @@ def main():
         t_logic = time.monotonic()
 
         # --- interpolation RIFE entre les deux voisines, a l'instant exact ---
-        # chaque image affichee est un instant interpole unique : a 10% de
-        # vitesse, ~20 instants differents entre deux images camera. Si la
-        # pleine resolution depasse le budget, on passe en demi-resolution
-        # (fluide quand meme) plutot que de retomber sur l'image la plus
-        # proche (paliers visibles) ; remontee re-essayee periodiquement.
+        # chaque image affichee est un instant interpole unique. Si la pleine
+        # resolution depasse le budget : demi-resolution (fluide quand meme)
+        # plutot que l'image la plus proche ; remontee re-essayee periodiquement.
         frac = (target - t_prev) / (t_next - t_prev) if t_next > t_prev else 1.0
         used_rife = False
         essai = rife_mode
         if rife_mode == "coupe" and n_frame % 90 == 0:
-            essai = "demi"                       # nouvel essai apres coupure
+            essai = "demi"
         elif rife_mode == "demi" and n_frame % 180 == 0:
-            essai = "pleine"                     # tentative de remontee
+            essai = "pleine"
         if rife_on and rife.ok and 0.04 < frac < 0.96 and essai != "coupe":
             try:
                 t0 = time.monotonic()
@@ -442,7 +596,6 @@ def main():
                                        half=(essai == "demi"))
                 cost = time.monotonic() - t0
                 c = rife_costs[essai]
-                # mesure fraiche quand on (re)teste un palier, EMA sinon
                 c = cost if (c == 0.0 or essai != rife_mode) \
                     else 0.8 * c + 0.2 * cost
                 rife_costs[essai] = c
@@ -471,10 +624,16 @@ def main():
         out = cv2.flip(out, 1)                  # effet miroir horizontal
         t_image = time.monotonic()
 
-        # --- overlays ---
-        if st.ref_width is None:
-            draw_text(out, f"Restez immobile {st.stable_secs:.0f}s (ou C) pour calibrer", 60)
-        d_txt = f"{distance:.2f} m" if distance else "--"
+        # --- HUD (spec §3) ---
+        v_eff = v_smooth if delay > 0.0 else min(v_smooth, 1.0)
+        if frozen or (distance is not None and v_cible == 0.0):
+            etat = "FIGE"
+        elif distance is not None and distance < p["full"]:
+            etat = "RALENTI"
+        elif delay > 0.05 and v_smooth > 1.02:
+            etat = "ACCELERATION"
+        else:
+            etat = "EN PHASE"
         if not rife.ok:
             rife_txt, rife_ok = rife.status, False
         elif not rife_on:
@@ -485,31 +644,47 @@ def main():
             c_ms = rife_costs[rife_mode] * 1000.0
             rife_txt = f"RIFE {rife_mode} res ({c_ms:.1f} ms)"
             rife_ok = rife_mode == "pleine"
-        # panneau rafraichi a ~10 Hz : inutile a 60, et ca coute du temps CPU
-        if n_frame % 6 == 0:
+        if st.ref_width is None:
+            rounded_box(out, 24, out.shape[0] - 84, 700, out.shape[0] - 24)
+            hud_text(out, f"Restez immobile {st.stable_secs:.0f} s "
+                          f"(ou touche C) pour calibrer",
+                     44, out.shape[0] - 46, 0.7)
+        hud_draw(out, HUD_MODES[hud_mode], {
+            "etat": etat, "v": v_eff, "retard": delay, "distance": distance,
+            "version": active_preset or "--",
+            "device": "GPU" if (rife.ok and cuda_ok) else "CPU",
+            "fps_r": fps_render, "fps_c": st.fps_cam,
+            "rife": rife_txt, "naming": naming,
+        })
+
+        # --- panneau (rafraichi a ~10 Hz, masquable touche P) ---
+        if panel_visible and n_frame % 6 == 0:
+            noms = sorted(presets)
+            liste = ", ".join(f"[{n}]" if n == active_preset else n
+                              for n in noms) if noms else "aucune (touche S)"
             panel_draw([
                 (cuda_txt, cuda_ok),
                 (rife_txt, rife_ok),
-                (f"Distance : {d_txt}", distance is not None),
-                (f"Vitesse : {v:.2f}   Retard : {delay:.1f} s", True),
+                (f"Etat : {etat}   Vitesse : x{v_eff:.2f}", True),
+                (f"Distance : "
+                 f"{f'{distance:.2f} m' if distance else '--'}   "
+                 f"Retard : {delay:.1f} s", distance is not None),
                 (f"Camera : {st.fps_cam:.0f} im/s   Rendu : {fps_render:.0f} im/s",
                  fps_render > RENDER_FPS - 3),
                 (f"Reference : {'calibree' if st.ref_width else 'en attente'}",
                  st.ref_width is not None),
-                (f"Nouvelle ref apres {st.stable_secs:.0f} s immobile", True),
                 (f"Buffer : {len(st.buffer) / FPS:.0f} / {buffer_s} s", True),
+                (f"Versions : {liste[:44]}", True),
                 (f"Anomalies : cam {st.cam_drops}  retard {late}  saut {jumps}",
                  st.cam_drops + late + jumps == 0),
-                ("Touches : C ref, I interp, R defauts, Q quitter", True),
+                ("Touches : C I H S P R fleches Q", True),
             ])
         cv2.imshow(WIN_MAIN, out)
         t_draw = time.monotonic()
 
-        # --- cadence d'affichage : RENDER_FPS minimum garanti ---
-        # waitKey(1) pompe l'interface et le clavier ; le reste du budget est
-        # dormi avec time.sleep, precis a ~1 ms (waitKey(n) de Windows a une
-        # granularite de ~15 ms, inutilisable pour tenir 60 Hz)
-        key = cv2.waitKey(1) & 0xFF
+        # --- cadence d'affichage : waitKeyEx(1) + sommeil precis (~1 ms) ---
+        kx = cv2.waitKeyEx(1)
+        key = kx & 0xFF if 0 <= kx < 256 else (255 if kx == -1 else 254)
         reste = budget - (time.monotonic() - loop_start)
         if reste > 0.002:
             time.sleep(reste - 0.001)
@@ -517,7 +692,7 @@ def main():
 
         # --- bilan de performance toutes les 5 s dans echo_debug.log ---
         if t_wait_prev is not None:
-            acc["autre"] += loop_start - t_wait_prev   # clavier, fenetre, boucle
+            acc["autre"] += loop_start - t_wait_prev
         t_wait_prev = t_wait
         acc["logic"] += t_logic - loop_start
         acc["image"] += t_image - t_logic
@@ -542,20 +717,65 @@ def main():
             acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0, autre=0.0,
                        rife_ms=0.0, rife_n=0, n=0)
             last_perf = t_wait
-        if key in (ord('q'), ord('Q'), 27):     # Q ou Echap
-            break
+
         if cv2.getWindowProperty(WIN_MAIN, cv2.WND_PROP_VISIBLE) < 1:
             break                               # fenetre fermee a la souris
+
+        # --- clavier ---
+        if naming is not None:                  # saisie du nom de version
+            if key == 13 or key == 10:          # Entree -> sauver
+                nom = naming.strip()
+                if nom:
+                    presets[nom] = dict(saved_positions)
+                    presets_save(presets)
+                    active_preset = nom
+                    debug_log("presets", f"version '{nom}' sauvegardee")
+                naming = None
+            elif key == 27:                     # Echap -> annuler
+                naming = None
+            elif key == 8:                      # retour arriere
+                naming = naming[:-1]
+            elif 32 <= key < 127 and len(naming) < 24:
+                naming += chr(key)
+            continue
+
+        if key in (ord('q'), ord('Q'), 27):     # Q ou Echap
+            break
         if key in (ord('i'), ord('I')):
             rife_on = not rife_on
+        if key in (ord('h'), ord('H')):         # mode HUD
+            hud_mode = (hud_mode + 1) % len(HUD_MODES)
+        if key in (ord('s'), ord('S')):         # sauver une version nommee
+            naming = ""
+        if key in (ord('p'), ord('P')):         # masquer/afficher le panneau
+            if panel_visible:
+                saved_positions = panel_positions()
+                cv2.destroyWindow(WIN_PANEL)
+                panel_visible = False
+            else:
+                panel_create()
+                panel_apply(saved_positions)
+                panel_visible = True
         if key in (ord('c'), ord('C')):
             st.calib_request = True
             delay = 0.0
-        if key in (ord('r'), ord('R')):        # valeurs par defaut
-            panel_reset()
+        if key in (ord('r'), ord('R')):         # valeurs par defaut
+            if panel_visible:
+                for nom_c, (defaut, _) in PANEL_DEFAULTS.items():
+                    cv2.setTrackbarPos(nom_c, WIN_PANEL, defaut)
+            saved_positions = {n: d for n, (d, _) in PANEL_DEFAULTS.items()}
             stable_keys = None
-        if ord('0') <= key <= ord('9'):         # duree d'immobilite : 1..9 s, 0 = 10 s
+        if ord('0') <= key <= ord('9'):         # duree d'immobilite : 1..9, 0=10
             stable_keys = 10.0 if key == ord('0') else float(key - ord('0'))
+        if kx in KEYS_LEFT or kx in KEYS_RIGHT: # version precedente / suivante
+            noms = sorted(presets)
+            if noms:
+                if active_preset in noms:
+                    i = noms.index(active_preset)
+                    i = (i + (1 if kx in KEYS_RIGHT else -1)) % len(noms)
+                else:
+                    i = 0
+                charger_version(noms[i])
 
     st.running = False
     worker.join(timeout=2.0)
