@@ -69,6 +69,8 @@ class RifeInterpolator:
         self.ok = False
         self.status = "RIFE : non charge"
         self._warmup_size = warmup_size
+        self._cache_key = None      # cache GPU du couple d'images courant
+        self._t0 = self._t1 = None
         try:
             import torch
             self._torch = torch
@@ -104,22 +106,45 @@ class RifeInterpolator:
             _journal(f"init impossible : {e}\n{traceback.format_exc()}")
 
     def _warmup(self):
-        """Passages a vide a la taille reelle des images : initialise les
-        kernels CUDA et l'autotune cudnn pour que la premiere vraie
-        interpolation ne prenne pas plusieurs centaines de ms."""
+        """Passages a vide a la taille reelle des images (pleine et demie) :
+        initialise les kernels CUDA et l'autotune cudnn pour que la premiere
+        vraie interpolation ne prenne pas plusieurs centaines de ms."""
         import numpy as np
         vide = np.zeros((*self._warmup_size, 3), np.uint8)
-        for _ in range(3):
-            self.interpolate(vide, vide, 0.5)
+        for half in (False, True):
+            for _ in range(3):
+                self.interpolate(vide, vide, 0.5, half=half)
+            self._cache_key = None
 
-    def interpolate(self, img0, img1, t):
-        """Image intermediaire entre img0 et img1 (BGR uint8) a l'instant t."""
+    def _to_tensor(self, img):
+        torch = self._torch
+        return (torch.from_numpy(img).to(self.device)
+                .permute(2, 0, 1).unsqueeze(0).float() / 255.0)
+
+    def interpolate(self, img0, img1, t, pair_key=None, half=False):
+        """Image intermediaire entre img0 et img1 (BGR uint8) a l'instant t.
+
+        pair_key : identifiant du couple (img0, img1). En ralenti, le meme
+        couple sert a des dizaines d'images de suite : ses tenseurs GPU sont
+        gardes en cache, seul t change (economise les transferts CPU->GPU).
+        half : interpole en demi-resolution puis remonte a la taille d'origine
+        (~4x moins cher) — mode degrade quand la pleine resolution ne tient
+        pas dans le budget des 60 im/s.
+        """
+        import cv2
         torch = self._torch
         with torch.inference_mode():
-            t0 = (torch.from_numpy(img0).to(self.device)
-                  .permute(2, 0, 1).unsqueeze(0).float() / 255.0)
-            t1 = (torch.from_numpy(img1).to(self.device)
-                  .permute(2, 0, 1).unsqueeze(0).float() / 255.0)
+            key = (pair_key, half)
+            if pair_key is None or key != self._cache_key:
+                if half:
+                    h, w = img0.shape[:2]
+                    a = cv2.resize(img0, (w // 2, h // 2))
+                    b = cv2.resize(img1, (w // 2, h // 2))
+                else:
+                    a, b = img0, img1
+                self._t0, self._t1 = self._to_tensor(a), self._to_tensor(b)
+                self._cache_key = key
+            t0, t1 = self._t0, self._t1
             if self.autocast:
                 with torch.autocast("cuda", dtype=torch.float16):
                     out = self.net(t0, t1, timestep=float(t),
@@ -128,4 +153,8 @@ class RifeInterpolator:
                 out = self.net(t0, t1, timestep=float(t),
                                scale_list=SCALE_LIST, training=False)
             out = (out[0].float().clamp(0, 1) * 255.0).byte()
-            return out.permute(1, 2, 0).contiguous().cpu().numpy()
+            res = out.permute(1, 2, 0).contiguous().cpu().numpy()
+        if half:
+            res = cv2.resize(res, (img0.shape[1], img0.shape[0]),
+                             interpolation=cv2.INTER_LINEAR)
+        return res

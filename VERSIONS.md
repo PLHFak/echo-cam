@@ -6,6 +6,17 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.9 — 27-09-2026 · Ralenti profond fluide : RIFE par paliers + cache GPU
+- En ralenti fort, les saccades venaient de la coupure automatique de RIFE
+  (seuil 12,5 ms trop agressif) : retour à « l'image la plus proche » =
+  paliers visibles. Chaque image affichée doit être un instant interpolé
+  unique (à 10 % de vitesse : ~20 instants entre deux images caméra).
+- RIFE par paliers : pleine résolution → **demi-résolution** (~4× moins
+  cher, toujours fluide) → coupé, avec remontée automatique ; seuil relevé
+  à 85 % du budget. État du palier affiché dans le panneau et les logs.
+- Cache GPU du couple d'images courant : en ralenti, seul l'instant t
+  change — plus de renvoi des images au GPU à chaque rafraîchissement.
+
 ## v1.8 — 27-09-2026 · Le 60 im/s tient : analyse allégée (diagnostic aux logs)
 - Diagnostic (echo_debug.log de PLH) : la détection de posture à pleine
   cadence monopolisait le verrou Python (GIL) — affichage plafonné à 30,
