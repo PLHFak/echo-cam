@@ -12,6 +12,8 @@ Usage :
 
 import hashlib
 import os
+import time
+import traceback
 import urllib.request
 
 WEIGHTS_URL    = ("https://github.com/Fannovel16/ComfyUI-Frame-Interpolation"
@@ -21,6 +23,19 @@ WEIGHTS_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               "models", "rife49.pth")
 ARCH_VER       = "4.7"
 SCALE_LIST     = [8, 4, 2, 1]
+
+
+def _journal(msg):
+    """Ecrit aussi dans echo_debug.log : une erreur RIFE doit laisser une
+    trace exploitable, pas seulement un type d'exception dans le panneau."""
+    print(f"[ECHO] {msg}")
+    try:
+        chemin = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "echo_debug.log")
+        with open(chemin, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%H:%M:%S") + f" [rife] {msg}\n")
+    except OSError:
+        pass
 
 
 def _sha256(path):
@@ -59,6 +74,9 @@ class RifeInterpolator:
             self._torch = torch
             if require_cuda and not torch.cuda.is_available():
                 self.status = "RIFE : GPU CUDA requis"
+                _journal(f"CUDA indisponible (torch {torch.__version__}, "
+                         f"build CUDA {torch.version.cuda}) : verifier que "
+                         f"lancer.bat a bien installe torch cu124")
                 return
             path = _ensure_weights()
 
@@ -76,12 +94,14 @@ class RifeInterpolator:
             net.load_state_dict(sd)
             net.eval().to(self.device)
             self.net = net
+            self._warmup()
+            # ok seulement une fois le warm-up passe : une init a moitie
+            # reussie ferait planter la boucle d'affichage a chaque image
             self.ok = True
             self.status = f"RIFE 4.9 pret ({self.device.type.upper()})"
-            self._warmup()
         except Exception as e:
             self.status = f"RIFE : erreur ({type(e).__name__})"
-            print(f"[ECHO] RIFE indisponible : {e}")
+            _journal(f"init impossible : {e}\n{traceback.format_exc()}")
 
     def _warmup(self):
         """Passages a vide a la taille reelle des images : initialise les
