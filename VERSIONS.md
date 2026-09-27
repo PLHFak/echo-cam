@@ -6,22 +6,27 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
-## v1.6 — 27-09-2026 · Réglages expliqués + debug de continuité
+## v1.6 — 27-09-2026 · Rendu 30 im/s garanti, réglages expliqués, debug
+- Refonte : capture et analyse dans un thread ; affichage cadencé à
+  **30 im/s minimum**. Si RIFE dépasse le budget de 33 ms, il est coupé
+  automatiquement (et retenté périodiquement) — la cadence prime.
+- Poids RIFE (rife49.pth, ~21 Mo, empreinte sha256 vérifiée) téléchargés
+  par le programme dans `models/` — plus de téléchargement dans
+  `lancer.bat` ; `rife.py`/rife47.pth remplacés par `rife_interp.py`.
 - Panneau : une ligne d'explication par curseur avec sa valeur par défaut ;
-  touche **R** pour remettre tous les curseurs aux valeurs par défaut.
-- Debug : compteur d'anomalies dans le panneau (images caméra manquantes,
+  touche **R** = remise aux valeurs par défaut ; C/I/R aussi en majuscule.
+- Debug : compteurs d'anomalies dans le panneau (images caméra manquantes,
   cycles d'affichage trop longs, sauts de continuité de lecture), détail
   journalisé dans la console et `echo_debug.log`.
-- Touches C, I, R acceptées aussi en majuscule.
-
-## v1.5 — 27-09-2026 · Interpolation RIFE + rendu 30 im/s garanti
-- Ralenti fluide : l'image affichée est interpolée par RIFE 4.9 (GPU) à
-  l'instant exact entre les deux images voisines du buffer. Touche **I**
-  pour couper/rétablir. Poids (~21 Mo) téléchargés au premier lancement.
-- Capture/analyse dans un thread ; affichage cadencé à **30 im/s minimum**
-  (si RIFE est trop lent, retour automatique à l'image la plus proche).
-- Panneau : état RIFE (coût en ms) et cadence de rendu affichés.
 - Quitter aussi avec **Échap** ou la croix de la fenêtre (en plus de Q).
+
+## v1.5 — 27-09-2026 · Ralenti fluide (interpolation RIFE)
+- Interpolation RIFE v4.7 sur GPU (fp16) entre les deux images qui encadrent
+  le retard : le ralenti profond devient fluide. Touche **I** = on/off
+  (ON par défaut quand CUDA est disponible).
+- Poids (rife47.pth, 20 Mo) téléchargés automatiquement par `lancer.bat`.
+- Architecture IFNet reprise (licence MIT) de ComfyUI-Frame-Interpolation,
+  validée ici contre les poids réels (objet déplacé retrouvé à mi-chemin).
 
 ## v1.4 — 27-09-2026 · Socle V2 : panneau de réglages + PyTorch CUDA
 - Panneau latéral « ECHO — Réglages » : curseurs seuils arrêt/direct,
