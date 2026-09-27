@@ -410,16 +410,22 @@ def main():
         was_too_slow = too_slow
         if (rife_on and rife.ok and 0.04 < frac < 0.96
                 and (not too_slow or n_frame % 90 == 0)):
-            t0 = time.monotonic()
-            out = rife.interpolate(img_prev, img_next, frac)
-            cost = time.monotonic() - t0
-            # apres une periode "trop lent", repartir de la mesure fraiche
-            rife_cost = cost if (rife_cost == 0.0 or too_slow) \
-                        else 0.8 * rife_cost + 0.2 * cost
-            acc["rife_ms"] += cost * 1000.0
-            acc["rife_n"] += 1
-            used_rife = True
-        else:
+            try:
+                t0 = time.monotonic()
+                out = rife.interpolate(img_prev, img_next, frac)
+                cost = time.monotonic() - t0
+                # apres une periode "trop lent", repartir de la mesure fraiche
+                rife_cost = cost if (rife_cost == 0.0 or too_slow) \
+                            else 0.8 * rife_cost + 0.2 * cost
+                acc["rife_ms"] += cost * 1000.0
+                acc["rife_n"] += 1
+                used_rife = True
+            except Exception as e:              # jamais fatal pour l'affichage
+                rife.ok = False
+                rife.status = f"RIFE : erreur ({type(e).__name__})"
+                debug_log("rife", f"erreur pendant l'interpolation, "
+                                  f"interpolation coupee : {e}")
+        if not used_rife:
             out = img_prev if frac < 0.5 else img_next
         out = cv2.flip(out, 1)                  # effet miroir horizontal
         t_image = time.monotonic()
