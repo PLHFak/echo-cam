@@ -6,6 +6,13 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.4 — 27-09-2026 · Socle V2 : panneau de réglages + PyTorch CUDA
+- Panneau latéral « ECHO — Réglages » : curseurs seuils arrêt/direct,
+  vitesse de rattrapage, profondeur du buffer (redimensionné en direct),
+  durée d'immobilité + état en direct (distance, vitesse, retard, im/s, GPU).
+- PyTorch CUDA (cu124) installé par `lancer.bat`, état CUDA affiché au
+  lancement et dans le panneau. Prépare RIFE (étape suivante).
+
 ## v1.3 — 27-09-2026 · Référence automatique
 - Immobile pendant N secondes (±15 % de largeur d'épaules) : la lecture
   rattrape le direct et la position courante devient la référence 0.
