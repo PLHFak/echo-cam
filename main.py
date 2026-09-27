@@ -7,9 +7,12 @@ puis accelere pour rattraper le direct. Immobile N secondes : la position
 courante devient la reference 0 (lecture en direct).
 
 V2 : la capture et l'analyse tournent dans un thread ; l'affichage est cadence
-a 30 images/s minimum. En ralenti, l'image affichee est fabriquee par RIFE
-(interpolation GPU) entre les deux images voisines du buffer : le ralenti est
-fluide au lieu de repeter les images. Touche I pour couper/retablir RIFE.
+a 60 images/s (ecran 60 Hz), independamment de la camera (30 im/s). L'image
+affichee est fabriquee en permanence par RIFE (interpolation GPU) entre les
+deux images voisines du buffer — en ralenti comme en direct : la camera donne
+30 im/s, l'ecran recoit 60. Touche I pour couper/retablir RIFE.
+Pour toujours avoir deux images autour de l'instant affiche, la lecture vit
+avec une micro-latence fixe de ~50 ms (LIVE_LATENCY), imperceptible.
 
 Dependances : voir requirements.txt (mediapipe 0.10.21, torch cu124, Py 3.11/3.12)
 Lancer :      double-clic sur lancer.bat (Windows) ou python main.py
@@ -33,6 +36,8 @@ import mediapipe as mp
 
 from rife_interp import RifeInterpolator
 
+ECHO_VERSION   = "1.7"
+
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau de reglages)
 # ---------------------------------------------------------------------------
@@ -41,7 +46,11 @@ CAP_WIDTH      = 1280
 CAP_HEIGHT     = 720
 FPS            = 30       # cadence camera, sert au dimensionnement du buffer
 
-RENDER_FPS     = 30       # cadence d'affichage minimale garantie (consigne)
+RENDER_FPS     = 60       # cadence d'affichage : ecran 60 Hz (la camera, elle,
+                          # reste a 30 im/s ; RIFE fabrique les images entre)
+LIVE_LATENCY   = 1.5 / FPS  # ~50 ms de latence fixe pour toujours avoir deux
+                            # images autour de l'instant affiche (interpolation
+                            # possible meme en direct)
 
 DIST_STOP      = 0.5      # m — en dessous, image figee
 DIST_FULL      = 2.0      # m — au dessus, direct / rattrapage
@@ -285,8 +294,14 @@ def main():
     cuda_ok, cuda_txt = gpu_status()
     print(f"[ECHO] {cuda_txt}")
 
-    rife = RifeInterpolator()          # telecharge les poids au premier lancement
+    # telecharge les poids au premier lancement ; warm-up a la taille reelle
+    # pour que la premiere interpolation soit deja dans le budget des 16,7 ms
+    rife = RifeInterpolator(warmup_size=(CAP_HEIGHT, CAP_WIDTH))
     print(f"[ECHO] {rife.status}")
+    debug_log("config", f"ECHO v{ECHO_VERSION} | {cuda_txt} | {rife.status} | "
+                        f"rendu vise {RENDER_FPS} im/s (budget "
+                        f"{1000.0 / RENDER_FPS:.1f} ms) | camera demandee "
+                        f"{CAP_WIDTH}x{CAP_HEIGHT}@{FPS}")
 
     cap = cv2.VideoCapture(CAM_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAP_WIDTH)
@@ -316,6 +331,13 @@ def main():
     late        = 0       # debug : cycles d'affichage au dela du budget
     jumps       = 0       # debug : sauts dans la continuite de lecture
     prev_target = None    # instant de lecture affiche au cycle precedent
+    was_too_slow = False  # debug : etat precedent de la coupure RIFE
+
+    # accumulateurs du bilan de performance (une ligne toutes les 5 s dans
+    # echo_debug.log : ou part le temps de chaque cycle d'affichage)
+    acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0,
+               rife_ms=0.0, rife_n=0, n=0)
+    last_perf = time.monotonic()
 
     cv2.namedWindow(WIN_MAIN, cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty(WIN_MAIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -351,8 +373,8 @@ def main():
                 if cv2.waitKey(20) & 0xFF in (ord('q'), ord('Q'), 27):
                     break
                 continue
-            delay = max(0.0, min(delay, now - st.stamps[0]))
-            target = now - delay
+            delay = max(0.0, min(delay, now - LIVE_LATENCY - st.stamps[0]))
+            target = now - LIVE_LATENCY - delay
 
             # --- debug : saut dans la continuite de lecture ---
             # sans a-coup, l'instant affiche avance exactement de v*dt ;
@@ -374,13 +396,19 @@ def main():
             else:
                 img_prev, t_prev = img_next, t_next
 
+        t_logic = time.monotonic()
+
         # --- interpolation RIFE entre les deux voisines, a l'instant exact ---
         # (coupee si trop lente pour tenir la cadence d'affichage ; nouvel
         #  essai periodique pour re-mesurer son cout)
         frac = (target - t_prev) / (t_next - t_prev) if t_next > t_prev else 1.0
         used_rife = False
         too_slow = rife_cost >= 0.75 * budget
-        if (rife_on and rife.ok and delay > 0.02 and 0.04 < frac < 0.96
+        if too_slow and not was_too_slow:
+            debug_log("rife", f"coupe : cout {rife_cost * 1000:.1f} ms > 75% "
+                              f"du budget de {budget * 1000:.1f} ms")
+        was_too_slow = too_slow
+        if (rife_on and rife.ok and 0.04 < frac < 0.96
                 and (not too_slow or n_frame % 90 == 0)):
             t0 = time.monotonic()
             out = rife.interpolate(img_prev, img_next, frac)
@@ -388,10 +416,13 @@ def main():
             # apres une periode "trop lent", repartir de la mesure fraiche
             rife_cost = cost if (rife_cost == 0.0 or too_slow) \
                         else 0.8 * rife_cost + 0.2 * cost
+            acc["rife_ms"] += cost * 1000.0
+            acc["rife_n"] += 1
             used_rife = True
         else:
             out = img_prev if frac < 0.5 else img_next
         out = cv2.flip(out, 1)                  # effet miroir horizontal
+        t_image = time.monotonic()
 
         # --- overlays ---
         if st.ref_width is None:
@@ -404,30 +435,57 @@ def main():
         elif rife_cost >= 0.75 * budget:
             rife_txt, rife_ok = "RIFE trop lent -> image la plus proche", False
         else:
-            rife_txt = f"RIFE actif ({rife_cost * 1000:.0f} ms)" if used_rife \
-                       else "RIFE pret (direct : inutile)"
+            rife_txt = f"RIFE actif 60 im/s ({rife_cost * 1000:.1f} ms)" \
+                       if used_rife else "RIFE pret"
             rife_ok = True
-        panel_draw([
-            (cuda_txt, cuda_ok),
-            (rife_txt, rife_ok),
-            (f"Distance : {d_txt}", distance is not None),
-            (f"Vitesse : {v:.2f}   Retard : {delay:.1f} s", True),
-            (f"Camera : {st.fps_cam:.0f} im/s   Rendu : {fps_render:.0f} im/s",
-             fps_render > RENDER_FPS - 3),
-            (f"Reference : {'calibree' if st.ref_width else 'en attente'}",
-             st.ref_width is not None),
-            (f"Nouvelle ref apres {st.stable_secs:.0f} s immobile", True),
-            (f"Buffer : {len(st.buffer) / FPS:.0f} / {buffer_s} s", True),
-            (f"Anomalies : cam {st.cam_drops}  retard {late}  saut {jumps}",
-             st.cam_drops + late + jumps == 0),
-            ("Touches : C ref, I interp, R defauts, Q quitter", True),
-        ])
+        # panneau rafraichi a ~10 Hz : inutile a 60, et ca coute du temps CPU
+        if n_frame % 6 == 0:
+            panel_draw([
+                (cuda_txt, cuda_ok),
+                (rife_txt, rife_ok),
+                (f"Distance : {d_txt}", distance is not None),
+                (f"Vitesse : {v:.2f}   Retard : {delay:.1f} s", True),
+                (f"Camera : {st.fps_cam:.0f} im/s   Rendu : {fps_render:.0f} im/s",
+                 fps_render > RENDER_FPS - 3),
+                (f"Reference : {'calibree' if st.ref_width else 'en attente'}",
+                 st.ref_width is not None),
+                (f"Nouvelle ref apres {st.stable_secs:.0f} s immobile", True),
+                (f"Buffer : {len(st.buffer) / FPS:.0f} / {buffer_s} s", True),
+                (f"Anomalies : cam {st.cam_drops}  retard {late}  saut {jumps}",
+                 st.cam_drops + late + jumps == 0),
+                ("Touches : C ref, I interp, R defauts, Q quitter", True),
+            ])
         cv2.imshow(WIN_MAIN, out)
+        t_draw = time.monotonic()
 
         # --- cadence d'affichage : RENDER_FPS minimum garanti ---
-        elapsed = time.monotonic() - loop_start
+        elapsed = t_draw - loop_start
         wait_ms = max(1, int((budget - elapsed) * 1000))
         key = cv2.waitKey(wait_ms) & 0xFF
+        t_wait = time.monotonic()
+
+        # --- bilan de performance toutes les 5 s dans echo_debug.log ---
+        acc["logic"] += t_logic - loop_start
+        acc["image"] += t_image - t_logic
+        acc["draw"]  += t_draw - t_image
+        acc["wait"]  += t_wait - t_draw
+        acc["n"]     += 1
+        if t_wait - last_perf >= 5.0:
+            n = max(1, acc["n"])
+            pct = 100.0 * acc["rife_n"] / n
+            r_ms = acc["rife_ms"] / max(1, acc["rife_n"])
+            debug_log("perf",
+                      f"rendu {fps_render:.1f} im/s (vise {RENDER_FPS}) | "
+                      f"camera {st.fps_cam:.1f} | rife {r_ms:.1f} ms sur "
+                      f"{pct:.0f}% des images | temps moyen par cycle : "
+                      f"logique {acc['logic'] / n * 1000:.1f} + image "
+                      f"{acc['image'] / n * 1000:.1f} + affichage "
+                      f"{acc['draw'] / n * 1000:.1f} + attente "
+                      f"{acc['wait'] / n * 1000:.1f} ms | anomalies : cam "
+                      f"{st.cam_drops} retard {late} saut {jumps}")
+            acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0,
+                       rife_ms=0.0, rife_n=0, n=0)
+            last_perf = t_wait
         if key in (ord('q'), ord('Q'), 27):     # Q ou Echap
             break
         if cv2.getWindowProperty(WIN_MAIN, cv2.WND_PROP_VISIBLE) < 1:
