@@ -6,6 +6,13 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.9.1 — 27-09-2026 · Preuve d'exécution GPU mesurée
+- Au démarrage, ligne « verif GPU » dans `echo_debug.log` : device du
+  modèle, nom de la carte, fp16, warm-up chronométré (synchronisé CUDA)
+  pleine et demi résolution, mémoire GPU allouée. Un 720p en ~10 ms est
+  impossible sur CPU (~0,5-1 s) : le chrono est la preuve.
+- Mémoire GPU allouée ajoutée à la ligne « perf » (toutes les 5 s).
+
 ## v1.9 — 27-09-2026 · Ralenti profond fluide : RIFE par paliers + cache GPU
 - En ralenti fort, les saccades venaient de la coupure automatique de RIFE
   (seuil 12,5 ms trop agressif) : retour à « l'image la plus proche » =

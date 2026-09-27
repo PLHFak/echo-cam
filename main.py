@@ -36,7 +36,7 @@ import mediapipe as mp
 
 from rife_interp import RifeInterpolator
 
-ECHO_VERSION   = "1.9"
+ECHO_VERSION   = "1.9.1"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau de reglages)
@@ -531,7 +531,8 @@ def main():
             debug_log("perf",
                       f"rendu {fps_render:.1f} im/s (vise {RENDER_FPS}) | "
                       f"camera {st.fps_cam:.1f} | analyse {st.pose_ms:.1f} ms | "
-                      f"rife {r_ms:.1f} ms ({rife_mode}) sur {pct:.0f}% des images | cycle : "
+                      f"rife {r_ms:.1f} ms ({rife_mode}) sur {pct:.0f}% "
+                      f"des images | gpu {rife.gpu_mem_mb()} Mo | cycle : "
                       f"logique {acc['logic'] / n * 1000:.1f} + image "
                       f"{acc['image'] / n * 1000:.1f} + affichage "
                       f"{acc['draw'] / n * 1000:.1f} + attente "
