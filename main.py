@@ -36,7 +36,7 @@ import mediapipe as mp
 
 from rife_interp import RifeInterpolator
 
-ECHO_VERSION   = "1.8"
+ECHO_VERSION   = "1.9"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau de reglages)
@@ -343,14 +343,17 @@ def main():
     stable_keys = None    # duree fixee par les touches 1..0 (prioritaire)
     rife_on     = True    # touche I
     fps_render  = 0.0
-    rife_cost   = 0.0     # cout d'une interpolation (s, moyenne mobile)
     budget      = 1.0 / RENDER_FPS
+    # RIFE par paliers : pleine resolution -> demi-resolution (~4x moins
+    # cher, toujours fluide) -> coupe. Remontee re-essayee periodiquement.
+    rife_mode   = "pleine"
+    rife_costs  = {"pleine": 0.0, "demi": 0.0}   # moyennes mobiles (s)
+    rife_budget = 0.85 * budget   # le reste du cycle coute ~2 ms
     prev_t      = time.monotonic()
     n_frame     = 0
     late        = 0       # debug : cycles d'affichage au dela du budget
     jumps       = 0       # debug : sauts dans la continuite de lecture
     prev_target = None    # instant de lecture affiche au cycle precedent
-    was_too_slow = False  # debug : etat precedent de la coupure RIFE
 
     # accumulateurs du bilan de performance (une ligne toutes les 5 s dans
     # echo_debug.log : ou part le temps de chaque cycle d'affichage)
@@ -419,24 +422,42 @@ def main():
         t_logic = time.monotonic()
 
         # --- interpolation RIFE entre les deux voisines, a l'instant exact ---
-        # (coupee si trop lente pour tenir la cadence d'affichage ; nouvel
-        #  essai periodique pour re-mesurer son cout)
+        # chaque image affichee est un instant interpole unique : a 10% de
+        # vitesse, ~20 instants differents entre deux images camera. Si la
+        # pleine resolution depasse le budget, on passe en demi-resolution
+        # (fluide quand meme) plutot que de retomber sur l'image la plus
+        # proche (paliers visibles) ; remontee re-essayee periodiquement.
         frac = (target - t_prev) / (t_next - t_prev) if t_next > t_prev else 1.0
         used_rife = False
-        too_slow = rife_cost >= 0.75 * budget
-        if too_slow and not was_too_slow:
-            debug_log("rife", f"coupe : cout {rife_cost * 1000:.1f} ms > 75% "
-                              f"du budget de {budget * 1000:.1f} ms")
-        was_too_slow = too_slow
-        if (rife_on and rife.ok and 0.04 < frac < 0.96
-                and (not too_slow or n_frame % 90 == 0)):
+        essai = rife_mode
+        if rife_mode == "coupe" and n_frame % 90 == 0:
+            essai = "demi"                       # nouvel essai apres coupure
+        elif rife_mode == "demi" and n_frame % 180 == 0:
+            essai = "pleine"                     # tentative de remontee
+        if rife_on and rife.ok and 0.04 < frac < 0.96 and essai != "coupe":
             try:
                 t0 = time.monotonic()
-                out = rife.interpolate(img_prev, img_next, frac)
+                out = rife.interpolate(img_prev, img_next, frac,
+                                       pair_key=(t_prev, t_next),
+                                       half=(essai == "demi"))
                 cost = time.monotonic() - t0
-                # apres une periode "trop lent", repartir de la mesure fraiche
-                rife_cost = cost if (rife_cost == 0.0 or too_slow) \
-                            else 0.8 * rife_cost + 0.2 * cost
+                c = rife_costs[essai]
+                # mesure fraiche quand on (re)teste un palier, EMA sinon
+                c = cost if (c == 0.0 or essai != rife_mode) \
+                    else 0.8 * c + 0.2 * cost
+                rife_costs[essai] = c
+                if c >= rife_budget:
+                    nouveau = "demi" if essai == "pleine" else "coupe"
+                    if nouveau != rife_mode:
+                        debug_log("rife", f"{essai} res : {c * 1000:.1f} ms > "
+                                          f"budget {rife_budget * 1000:.1f} ms "
+                                          f"-> {nouveau}")
+                    rife_mode = nouveau if essai == rife_mode else rife_mode
+                else:
+                    if essai != rife_mode:
+                        debug_log("rife", f"passage en {essai} res "
+                                          f"({c * 1000:.1f} ms)")
+                    rife_mode = essai
                 acc["rife_ms"] += cost * 1000.0
                 acc["rife_n"] += 1
                 used_rife = True
@@ -458,12 +479,12 @@ def main():
             rife_txt, rife_ok = rife.status, False
         elif not rife_on:
             rife_txt, rife_ok = "RIFE coupe (touche I)", False
-        elif rife_cost >= 0.75 * budget:
+        elif rife_mode == "coupe":
             rife_txt, rife_ok = "RIFE trop lent -> image la plus proche", False
         else:
-            rife_txt = f"RIFE actif 60 im/s ({rife_cost * 1000:.1f} ms)" \
-                       if used_rife else "RIFE pret"
-            rife_ok = True
+            c_ms = rife_costs[rife_mode] * 1000.0
+            rife_txt = f"RIFE {rife_mode} res ({c_ms:.1f} ms)"
+            rife_ok = rife_mode == "pleine"
         # panneau rafraichi a ~10 Hz : inutile a 60, et ca coute du temps CPU
         if n_frame % 6 == 0:
             panel_draw([
@@ -510,7 +531,7 @@ def main():
             debug_log("perf",
                       f"rendu {fps_render:.1f} im/s (vise {RENDER_FPS}) | "
                       f"camera {st.fps_cam:.1f} | analyse {st.pose_ms:.1f} ms | "
-                      f"rife {r_ms:.1f} ms sur {pct:.0f}% des images | cycle : "
+                      f"rife {r_ms:.1f} ms ({rife_mode}) sur {pct:.0f}% des images | cycle : "
                       f"logique {acc['logic'] / n * 1000:.1f} + image "
                       f"{acc['image'] / n * 1000:.1f} + affichage "
                       f"{acc['draw'] / n * 1000:.1f} + attente "
