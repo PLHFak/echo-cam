@@ -6,6 +6,16 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.8 — 27-09-2026 · Le 60 im/s tient : analyse allégée (diagnostic aux logs)
+- Diagnostic (echo_debug.log de PLH) : la détection de posture à pleine
+  cadence monopolisait le verrou Python (GIL) — affichage plafonné à 30,
+  RIFE mesuré 10× trop lent donc coupé, images caméra perdues.
+- Analyse de posture 1 image sur 3 (~10 Hz), sur image réduite (640 px),
+  modèle léger (complexity 0) : la distance reste fiable, le GIL respire.
+- Cadencement précis : `waitKey(1)` + `time.sleep` (~1 ms) au lieu du
+  `waitKey(n)` de Windows (granularité ~15 ms).
+- Ligne « perf » enrichie : coût d'analyse et temps « autre » mesurés.
+
 ## v1.7 — 27-09-2026 · 60 im/s à l'écran (écran 60 Hz)
 - Affichage cadencé à **60 im/s** : RIFE fabrique l'image intermédiaire à
   chaque rafraîchissement, en ralenti comme en direct (caméra toujours à

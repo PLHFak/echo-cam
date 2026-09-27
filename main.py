@@ -36,7 +36,7 @@ import mediapipe as mp
 
 from rife_interp import RifeInterpolator
 
-ECHO_VERSION   = "1.7"
+ECHO_VERSION   = "1.8"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau de reglages)
@@ -57,6 +57,12 @@ DIST_FULL      = 2.0      # m — au dessus, direct / rattrapage
 CATCHUP_SPEED  = 2.5      # vitesse de rattrapage du direct
 BUFFER_SECONDS = 12       # profondeur memoire (12 s * 30 fps * 720p ~ 1 Go RAM)
 SMOOTH_WINDOW  = 8        # lissage de la distance (nb de mesures)
+
+ANALYZE_EVERY  = 3        # analyse de posture 1 image camera sur 3 (~10 Hz) :
+ANALYZE_WIDTH  = 640      # sur image reduite. L'analyse ne sert qu'a estimer
+                          # la distance ; a pleine cadence elle monopolise le
+                          # verrou Python (GIL) et etouffe l'affichage 60 im/s
+                          # et les lancements GPU de RIFE (constate aux logs).
 ABSENT_TIMEOUT = 10.0     # s — sans detection, on garde la derniere distance
                           #     puis on considere la salle vide -> direct
 STABLE_TOL     = 0.15     # ±15 % de variation de largeur d'epaules = immobile
@@ -211,6 +217,7 @@ class Shared:
         self.want_max_frames = max_frames   # redimensionnement demande du buffer
         self.calib_request   = False        # touche C
         self.cam_drops       = 0            # images camera manquantes (debug)
+        self.pose_ms         = 0.0          # cout d'une analyse de posture
 
 
 def capture_thread(cap, pose, st):
@@ -224,6 +231,7 @@ def capture_thread(cap, pose, st):
     start_t      = time.monotonic()
     prev_t       = start_t
     fps_meas     = 0.0
+    n_cap        = 0
 
     while st.running:
         ok, frame = cap.read()
@@ -248,7 +256,7 @@ def capture_thread(cap, pose, st):
                 st.stamps = deque(st.stamps, maxlen=st.want_max_frames)
             st.buffer.append(frame)
             st.stamps.append(now)
-        h, w = frame.shape[:2]
+        st.fps_cam = fps_meas
 
         # --- calibration manuelle (touche C, demandee par l'affichage) ---
         if st.calib_request:
@@ -257,11 +265,21 @@ def capture_thread(cap, pose, st):
                 st.ref_width = float(np.mean(widths))
                 anchor_w, last_dist = None, None
 
-        # --- estimation de la distance ---
-        res = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        # --- analyse de posture : 1 image sur ANALYZE_EVERY, en reduit ---
+        # (le reste du temps, la derniere distance est conservee telle quelle)
+        n_cap += 1
+        if n_cap % ANALYZE_EVERY:
+            continue
+        t_pose = time.monotonic()
+        h, w = frame.shape[:2]
+        small = cv2.resize(frame, (ANALYZE_WIDTH, ANALYZE_WIDTH * h // w))
+        hs, ws = small.shape[:2]
+        res = pose.process(cv2.cvtColor(small, cv2.COLOR_BGR2RGB))
+        st.pose_ms = 0.8 * st.pose_ms + 0.2 * (time.monotonic() - t_pose) * 1000.0
+
         distance = None
         if res.pose_landmarks:
-            sw = shoulder_width_px(res.pose_landmarks.landmark, w, h)
+            sw = shoulder_width_px(res.pose_landmarks.landmark, ws, hs)
             if sw:
                 widths.append(sw)
                 sw_smooth = float(np.mean(widths))
@@ -286,7 +304,6 @@ def capture_thread(cap, pose, st):
                 widths.clear()
 
         st.distance = distance
-        st.fps_cam  = fps_meas
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +327,9 @@ def main():
     if not cap.isOpened():
         raise SystemExit("Impossible d'ouvrir la webcam (verifier CAM_INDEX).")
 
-    pose = mp.solutions.pose.Pose(model_complexity=1,
+    # modele leger (complexity 0) : suffisant pour une largeur d'epaules,
+    # et 2 a 3 fois moins de temps CPU sous le verrou Python
+    pose = mp.solutions.pose.Pose(model_complexity=0,
                                   min_detection_confidence=0.5,
                                   min_tracking_confidence=0.5)
 
@@ -335,9 +354,10 @@ def main():
 
     # accumulateurs du bilan de performance (une ligne toutes les 5 s dans
     # echo_debug.log : ou part le temps de chaque cycle d'affichage)
-    acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0,
+    acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0, autre=0.0,
                rife_ms=0.0, rife_n=0, n=0)
     last_perf = time.monotonic()
+    t_wait_prev = None    # fin du waitKey precedent (mesure du temps "autre")
 
     cv2.namedWindow(WIN_MAIN, cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty(WIN_MAIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -465,12 +485,19 @@ def main():
         t_draw = time.monotonic()
 
         # --- cadence d'affichage : RENDER_FPS minimum garanti ---
-        elapsed = t_draw - loop_start
-        wait_ms = max(1, int((budget - elapsed) * 1000))
-        key = cv2.waitKey(wait_ms) & 0xFF
+        # waitKey(1) pompe l'interface et le clavier ; le reste du budget est
+        # dormi avec time.sleep, precis a ~1 ms (waitKey(n) de Windows a une
+        # granularite de ~15 ms, inutilisable pour tenir 60 Hz)
+        key = cv2.waitKey(1) & 0xFF
+        reste = budget - (time.monotonic() - loop_start)
+        if reste > 0.002:
+            time.sleep(reste - 0.001)
         t_wait = time.monotonic()
 
         # --- bilan de performance toutes les 5 s dans echo_debug.log ---
+        if t_wait_prev is not None:
+            acc["autre"] += loop_start - t_wait_prev   # clavier, fenetre, boucle
+        t_wait_prev = t_wait
         acc["logic"] += t_logic - loop_start
         acc["image"] += t_image - t_logic
         acc["draw"]  += t_draw - t_image
@@ -482,14 +509,15 @@ def main():
             r_ms = acc["rife_ms"] / max(1, acc["rife_n"])
             debug_log("perf",
                       f"rendu {fps_render:.1f} im/s (vise {RENDER_FPS}) | "
-                      f"camera {st.fps_cam:.1f} | rife {r_ms:.1f} ms sur "
-                      f"{pct:.0f}% des images | temps moyen par cycle : "
+                      f"camera {st.fps_cam:.1f} | analyse {st.pose_ms:.1f} ms | "
+                      f"rife {r_ms:.1f} ms sur {pct:.0f}% des images | cycle : "
                       f"logique {acc['logic'] / n * 1000:.1f} + image "
                       f"{acc['image'] / n * 1000:.1f} + affichage "
                       f"{acc['draw'] / n * 1000:.1f} + attente "
-                      f"{acc['wait'] / n * 1000:.1f} ms | anomalies : cam "
+                      f"{acc['wait'] / n * 1000:.1f} + autre "
+                      f"{acc['autre'] / n * 1000:.1f} ms | anomalies : cam "
                       f"{st.cam_drops} retard {late} saut {jumps}")
-            acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0,
+            acc = dict(logic=0.0, image=0.0, draw=0.0, wait=0.0, autre=0.0,
                        rife_ms=0.0, rife_n=0, n=0)
             last_perf = t_wait
         if key in (ord('q'), ord('Q'), 27):     # Q ou Echap
