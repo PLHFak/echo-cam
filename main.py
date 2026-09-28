@@ -297,7 +297,7 @@ def hud_draw(img, mode, info):
                  ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
         return
     # mode complet
-    rounded_box(img, 24, 24, 470, 268)
+    rounded_box(img, 24, 24, 470, 268 + (28 if info.get("extra") else 0))
     hud_text(img, info["etat"], 44, 66, 1.0,
              ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
     d_txt = f"{info['distance']:.2f} m" if info["distance"] else "--"
@@ -310,6 +310,8 @@ def hud_draw(img, mode, info):
         f"   {CAP_WIDTH}x{CAP_HEIGHT}",
         info["rife"],
     ]
+    if info.get("extra"):
+        lignes.append(info["extra"])
     for i, txt in enumerate(lignes):
         hud_text(img, txt, 44, 102 + 28 * i, 0.62)
 
@@ -505,6 +507,7 @@ def main():
     frozen      = False     # etat FIGE avec hysteresis
     stable_keys = None      # duree fixee par les touches 1..0 (prioritaire)
     rife_on     = True      # touche I
+    reset_on    = True      # touche T : rattrapage du direct autorise (spec §3)
     hud_mode    = 0         # index dans HUD_MODES (touche H)
     naming      = None      # texte en cours de frappe (touche S), sinon None
     fps_render  = 0.0
@@ -548,7 +551,7 @@ def main():
         rife_mode, rife_costs = "pleine", {"pleine": 0.0, "demi": 0.0}
 
     def charger_version(nom):
-        nonlocal active_preset, saved_positions
+        nonlocal active_preset, saved_positions, reset_on
         vals = presets.get(nom)
         if vals is None:
             return
@@ -556,6 +559,7 @@ def main():
             panel_apply(vals)
         saved_positions = {n: int(vals.get(n, d)) for n, (d, _) in
                            PANEL_DEFAULTS.items()}
+        reset_on = bool(vals.get("_reset", True))
         active_preset = nom
         reset_run()
         debug_log("presets", f"version '{nom}' chargee")
@@ -591,6 +595,8 @@ def main():
         else:
             frozen = distance <= p["stop"]
         v_cible = 0.0 if frozen else speed_target(distance, p)
+        if not reset_on:                # reset OFF : jamais plus vite que le direct,
+            v_cible = min(v_cible, 1.0) # le retard acquis reste (spec §3)
         v_smooth += (v_cible - v_smooth) * p["smooth_speed"]
         delay += (1.0 - v_smooth) * dt
 
@@ -701,6 +707,7 @@ def main():
             "device": "GPU" if (rife.ok and cuda_ok) else "CPU",
             "fps_r": fps_render, "fps_c": st.fps_cam,
             "rife": rife_txt, "naming": naming,
+            "extra": None if reset_on else "reset OFF : le retard reste (T)",
         })
 
         # --- panneau (rafraichi a ~10 Hz, masquable touche P) ---
@@ -726,7 +733,9 @@ def main():
                 (f"Versions : {liste[:44]}", True),
                 (f"Anomalies : cam {st.cam_drops}  retard {late}  saut {jumps}",
                  st.cam_drops + late + jumps == 0),
-                ("Touches : C I H S P R fleches Q", True),
+                (f"Reset position : {'ON' if reset_on else 'OFF (retard garde)'}",
+                 reset_on),
+                ("Touches : C D I T H S P R fleches Q", True),
             ])
         cv2.imshow(WIN_MAIN, out)
         t_draw = time.monotonic()
@@ -775,7 +784,7 @@ def main():
             if key == 13 or key == 10:          # Entree -> sauver
                 nom = naming.strip()
                 if nom:
-                    presets[nom] = dict(saved_positions)
+                    presets[nom] = dict(saved_positions, _reset=reset_on)
                     presets_save(presets)
                     active_preset = nom
                     debug_log("presets", f"version '{nom}' sauvegardee")
@@ -794,6 +803,8 @@ def main():
             rife_on = not rife_on
         if key in (ord('d'), ord('D')) and depth.ok:   # IA <-> epaules
             st.depth_mode = "epaules" if st.depth_mode == "ia" else "ia"
+        if key in (ord('t'), ord('T')):                # reset de position on/off
+            reset_on = not reset_on
         if key in (ord('h'), ord('H')):         # mode HUD
             hud_mode = (hud_mode + 1) % len(HUD_MODES)
         if key in (ord('s'), ord('S')):         # sauver une version nommee
