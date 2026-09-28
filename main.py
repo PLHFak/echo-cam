@@ -43,6 +43,7 @@ import mediapipe as mp
 
 from rife_interp import RifeInterpolator
 from depth import DepthEstimator
+from bridge import Bridge
 
 ECHO_VERSION   = "1.10"
 
@@ -478,6 +479,10 @@ def main():
     # distance par profondeur IA (spec V1 §2) ; secours epaules si absente
     depth = DepthEstimator()
     print(f"[ECHO] {depth.status}")
+
+    # pont local pour l'interface HTML (spec V1 §1)
+    bridge = Bridge()
+    print(f"[ECHO] {bridge.status}")
     debug_log("config", f"ECHO v{ECHO_VERSION} | {cuda_txt} | {rife.status} | "
                         f"rendu vise {RENDER_FPS} im/s (budget "
                         f"{1000.0 / RENDER_FPS:.1f} ms) | camera demandee "
@@ -576,6 +581,56 @@ def main():
             late += 1
             debug_log("rendu", f"cycle de {dt * 1000:.0f} ms (budget "
                                f"{budget * 1000:.0f} ms, total {late})")
+
+        # --- commandes du panneau web (appliquees a chaud) ---
+        for cmd in bridge.poll():
+            try:
+                t = cmd.get("t")
+                if t == "reglage" and cmd.get("nom") in PANEL_DEFAULTS:
+                    nom_c = cmd["nom"]
+                    maxi = PANEL_DEFAULTS[nom_c][1]
+                    val = max(0, min(int(cmd.get("v", 0)), maxi))
+                    saved_positions[nom_c] = val
+                    if panel_visible:
+                        cv2.setTrackbarPos(nom_c, WIN_PANEL, val)
+                elif t == "option":
+                    nom_o, v_o = cmd.get("nom"), cmd.get("v")
+                    if nom_o == "interpolation":
+                        rife_on = bool(v_o)
+                    elif nom_o == "reset":
+                        reset_on = bool(v_o)
+                    elif nom_o == "profondeur" and depth.ok:
+                        st.depth_mode = "ia" if v_o else "epaules"
+                    elif nom_o == "hud" and v_o in HUD_MODES:
+                        hud_mode = HUD_MODES.index(v_o)
+                elif t == "defauts":
+                    saved_positions = {n: d for n, (d, _) in PANEL_DEFAULTS.items()}
+                    if panel_visible:
+                        panel_apply(saved_positions)
+                    stable_keys = None
+                elif t == "version":
+                    action, nom_v = cmd.get("action"), str(cmd.get("nom", ""))
+                    if action == "charger":
+                        charger_version(nom_v)
+                    elif action == "sauver" and nom_v.strip():
+                        presets[nom_v.strip()[:24]] = dict(saved_positions,
+                                                           _reset=reset_on)
+                        presets_save(presets)
+                        active_preset = nom_v.strip()[:24]
+                    elif action == "supprimer" and nom_v in presets:
+                        del presets[nom_v]
+                        presets_save(presets)
+                        if active_preset == nom_v:
+                            active_preset = None
+                    elif action == "renommer" and nom_v in presets:
+                        nouveau = str(cmd.get("nouveau", "")).strip()[:24]
+                        if nouveau and nouveau not in presets:
+                            presets[nouveau] = presets.pop(nom_v)
+                            presets_save(presets)
+                            if active_preset == nom_v:
+                                active_preset = nouveau
+            except Exception as e:              # jamais fatal pour l'affichage
+                debug_log("web", f"commande invalide {cmd} : {e}")
 
         if panel_visible:
             saved_positions = panel_positions()
@@ -737,6 +792,25 @@ def main():
                  reset_on),
                 ("Touches : C D I T H S P R fleches Q", True),
             ])
+        # --- etat pour le panneau web (~10 Hz) ---
+        if n_frame % 6 == 0:
+            bridge.publish({
+                "etat": etat, "v": v_eff, "retard": delay,
+                "distance": distance, "device": "GPU" if (rife.ok and cuda_ok) else "CPU",
+                "fps_r": fps_render, "fps_c": st.fps_cam,
+                "rife": rife_txt,
+                "profondeur": (f"Profondeur : IA ({st.depth_ms:.0f} ms)"
+                               if st.depth_mode == "ia"
+                               else f"Profondeur : epaules (secours) - {depth.status}"),
+                "profondeur_dispo": depth.ok,
+                "reglages": dict(saved_positions),
+                "options": {"interpolation": rife_on, "reset": reset_on,
+                            "profondeur_ia": st.depth_mode == "ia",
+                            "hud": HUD_MODES[hud_mode]},
+                "versions": {"liste": sorted(presets), "active": active_preset},
+                "version_app": ECHO_VERSION,
+            })
+
         cv2.imshow(WIN_MAIN, out)
         t_draw = time.monotonic()
 
