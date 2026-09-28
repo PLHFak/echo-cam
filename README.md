@@ -1,7 +1,8 @@
 # Jouer avec le temps — prototype
 
 Installation vidéo interactive : la lecture ralentit quand on s'approche de
-l'écran, se fige tout près, et rattrape le direct quand on recule.
+l'écran, rampe au ralenti extrême tout près, et rattrape le direct quand on
+recule.
 
 ## Installation sur Windows (une seule fois)
 
@@ -29,7 +30,8 @@ l'écran, se fige tout près, et rattrape le direct quand on recule.
 ## Utilisation
 
 Au lancement, restez simplement immobile ~10 s : votre position devient la
-référence (lecture en direct). Approchez-vous : l'image ralentit, puis se fige.
+référence (lecture en direct). Approchez-vous : l'image ralentit jusqu'à
+ramper à peine perceptiblement.
 Si vous restez immobile 10 s quelque part, la lecture rattrape le direct et
 cette position devient la nouvelle référence.
 
@@ -49,9 +51,10 @@ cette position devient la nouvelle référence.
 
 ### Les trois zones de distance
 
-- plus près que **Arrêt** (0,5 m) : image **figée** (avec 10 cm d'hystérésis
-  pour ne pas osciller au seuil) ;
-- entre **Arrêt** et **Direct** (2 m) : **ralenti** progressif (v de 0 à 1) ;
+- plus près que **Arrêt** (0,5 m) : l'image **rampe** à la vitesse plancher
+  **Vmin** (3 %) — jamais totalement figée, le retard reste donc borné
+  (avec 10 cm d'hystérésis pour ne pas osciller au seuil) ;
+- entre **Arrêt** et **Direct** (2 m) : **ralenti** progressif (v de Vmin à 1) ;
 - entre **Direct** et **Accel** (3 m) : **accélération** progressive
   (v de 1 à Vmax) — le retard se résorbe en douceur ;
 - au-delà d'**Accel** : rattrapage plein (Vmax). Une fois le retard à zéro,
@@ -83,9 +86,10 @@ défaut entre parenthèses. La touche **R** remet tout aux valeurs par défaut.
 
 | Curseur | Défaut | Ce qu'il fait |
 |---|---|---|
-| **Arrêt (cm)** | 50 | Plus près que cette distance, l'image se fige. |
+| **Arrêt (cm)** | 50 | Plus près que cette distance, l'image rampe à Vmin. |
 | **Direct (cm)** | 200 | Plus loin, lecture en direct (ou rattrapage). Entre Arrêt et Direct : ralenti progressif. |
 | **Rattrapage x10** | 25 (= x2,5) | Vitesse de la lecture quand elle rattrape le direct en reculant. |
+| **Vmin %** | 3 | Vitesse plancher : l'image avance toujours au moins à ce pourcentage, le retard ne croît plus sans fin. |
 | **Buffer (s)** | 12 | Mémoire d'images : c'est le retard maximum possible. 12 s en 720p ≈ 1 Go de RAM. |
 | **Immobilité (s)** | 10 | Durée sans bouger avant que la position devienne la nouvelle référence (touches 1..9, 0 en direct). |
 
@@ -120,8 +124,14 @@ calcule l'image exacte entre les deux images voisines du buffer — en ralenti
 comme en direct : la caméra donne 30 im/s, l'écran en reçoit 60. Pour cela,
 la lecture vit avec une micro-latence fixe d'environ 50 ms, imperceptible.
 
-- Les poids du modèle (~21 Mo) sont téléchargés automatiquement au premier
-  lancement dans `models/`. Calcul en demi-précision (fp16) sur le GPU.
+- L'étage d'interpolation est celui du projet **SUPER SLO 600** (slowcam) :
+  modèle **RIFE 4.26** (`flownet_v4.26.pkl`), calcul sur GPU en vraie
+  demi-précision (poids et tenseurs FP16). Au premier lancement, le programme
+  cherche les poids dans `models/`, puis dans l'installation SUPER SLO 600
+  (`C:\Users\evalh\SUPERSLO`) et les copie dans `models/`. La ligne
+  « chauffe GPU : … s » de `echo_debug.log` confirme l'exécution GPU.
+- Si ces poids sont introuvables, repli automatique sur l'ancien modèle
+  RIFE 4.9 (~21 Mo, téléchargé dans `models/`) — le repli est journalisé.
 - Sans GPU CUDA, le programme fonctionne normalement, sans interpolation
   (l'état est affiché dans le panneau de réglages).
 - Si l'interpolation est trop lente pour tenir 60 im/s (budget 16,7 ms),

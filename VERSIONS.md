@@ -6,6 +6,27 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.11 — 28-09-2026 · Greffe SUPER SLO 600 : RIFE 4.26 FP16 + vitesse plancher
+- **Étage d'interpolation greffé depuis le projet SUPER SLO 600** (slowcam,
+  la méthode éprouvée sur la RTX 4090) : modèle **RIFE 4.26**
+  (`flownet_v4.26.pkl`), exécution GPU en **vraie demi-précision** (poids et
+  tenseurs FP16, plus d'autocast), ligne « chauffe GPU : … s » mesurée au
+  démarrage comme dans slowcam — preuve de l'exécution GPU.
+  L'architecture echo-cam est conservée : webcam → buffer circulaire →
+  playhead → interpolation au timestep exact → HUD (60 im/s, cache GPU du
+  couple d'images, paliers pleine/demi-résolution).
+- Poids cherchés dans `models/flownet_v4.26.pkl`, puis dans l'installation
+  SUPER SLO 600 (`C:\Users\evalh\SUPERSLO`, recherche récursive si le
+  dossier a bougé) avec copie locale ; à défaut, **repli journalisé** sur
+  l'ancien RIFE 4.9 — l'application reste utilisable. (La variante
+  `flownet_v4.25.lite.pkl` n'est pas supportée par l'architecture.)
+- **Vitesse plancher Vmin (3 %, confirmée par PLH)** : fin du ralenti
+  infini. La zone « FIGÉ » devient **RAMPE** : plus près que Arrêt, l'image
+  avance toujours à Vmin au lieu de figer — le retard reste borné ; v = 0
+  n'est plus qu'un cas limite bref, jamais un état permanent. Ralenti
+  progressif de Vmin à 1 entre Arrêt et Direct. Nouveau curseur **Vmin %**
+  (0–25, défaut 3), sauvegardé dans les versions baptisées.
+
 ## v1.10 — 27-09-2026 · Spec V1 de l'architecte : 3 zones, HUD, versions baptisées
 - **Trois zones** : figé (< 0,5 m, hystérésis 10 cm) · ralenti 0→1 (0,5→2 m) ·
   accélération progressive 1→Vmax (2→3 m) · rattrapage plein (> 3 m).

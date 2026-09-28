@@ -1,9 +1,26 @@
 """
-Interpolation RIFE pour le projet ECHO.
+Interpolation RIFE pour le projet ECHO — etage greffe depuis SUPER SLO 600.
 
-Charge le modele RIFE 4.9 (architecture 4.7) et fabrique l'image intermediaire
-entre deux images du buffer, a un instant t quelconque (0 < t < 1).
-Les poids (~21 Mo) sont telecharges au premier lancement dans models/.
+La brique d'interpolation est reprise du projet « super slo 600 » (slowcam.py,
+installe dans C:\\Users\\evalh\\SUPERSLO\\slowcam\\ sur le PC cible) :
+- modele RIFE 4.26, poids flownet_v4.26.pkl (ceux qui marchent la-bas) ;
+- execution GPU en demi-precision REELLE : poids ET tenseurs en FP16
+  (methode slowcam), plus autocast ;
+- ligne « chauffe GPU : X.X s » mesuree au demarrage, comme slowcam —
+  c'est la preuve de l'execution GPU (un 720p en ~10 ms est impossible
+  sur CPU).
+Seule cette brique est greffee : la boucle d'affichage, le buffer et le HUD
+restent ceux d'echo-cam (webcam -> buffer -> playhead -> interpolation).
+
+Recherche des poids superslo, dans l'ordre :
+  1. models/flownet_v4.26.pkl (copie locale d'echo-cam) ;
+  2. installation SUPER SLO 600 : C:\\Users\\evalh\\SUPERSLO\\slowcam\\,
+     puis recherche recursive sous C:\\Users\\evalh\\SUPERSLO si le dossier
+     a bouge — le fichier trouve est copie dans models/ ;
+  3. a defaut : repli sur l'ancien etage (RIFE 4.9, telecharge ~21 Mo),
+     l'application reste utilisable ; le repli est journalise.
+NB : la variante flownet_v4.25.lite.pkl n'est pas utilisable ici
+(rife_arch.py implemente l'architecture 4.26, pas la 4.25.lite).
 
 Usage :
     rife = RifeInterpolator()          # rife.ok, rife.status
@@ -12,17 +29,26 @@ Usage :
 
 import hashlib
 import os
+import shutil
 import time
 import traceback
 import urllib.request
 
+_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# --- poids superslo (methode qui marche, cf. consigne de merge 28/09/2026) ---
+SUPERSLO_DIR   = r"C:\Users\evalh\SUPERSLO"
+SUPERSLO_PKL   = "flownet_v4.26.pkl"
+LOCAL_PKL      = os.path.join(_DIR, "models", SUPERSLO_PKL)
+
+# --- repli : ancien etage RIFE 4.9 (architecture 4.7), telecharge ---
 WEIGHTS_URL    = ("https://github.com/Fannovel16/ComfyUI-Frame-Interpolation"
                   "/releases/download/models/rife49.pth")
 WEIGHTS_SHA256 = "e55fd00f3cc184e3c65961f4bb827a9da022e78eed36b055242c0ac30000d533"
-WEIGHTS_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "models", "rife49.pth")
-ARCH_VER       = "4.7"
-SCALE_LIST     = [8, 4, 2, 1]
+WEIGHTS_FILE   = os.path.join(_DIR, "models", "rife49.pth")
+
+# listes d'echelles par architecture (4.26 : 5 blocs)
+SCALE_LISTS = {"4.26": [16, 8, 4, 2, 1], "4.7": [8, 4, 2, 1]}
 
 
 def _journal(msg):
@@ -30,8 +56,7 @@ def _journal(msg):
     trace exploitable, pas seulement un type d'exception dans le panneau."""
     print(f"[ECHO] {msg}")
     try:
-        chemin = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "echo_debug.log")
+        chemin = os.path.join(_DIR, "echo_debug.log")
         with open(chemin, "a", encoding="utf-8") as f:
             f.write(time.strftime("%H:%M:%S") + f" [rife] {msg}\n")
     except OSError:
@@ -47,19 +72,46 @@ def _sha256(path):
 
 
 def _ensure_weights():
-    """Telecharge les poids si absents ou corrompus. Retourne le chemin."""
+    """Repli 4.9 : telecharge les poids si absents ou corrompus."""
     if os.path.exists(WEIGHTS_FILE) and _sha256(WEIGHTS_FILE) == WEIGHTS_SHA256:
         return WEIGHTS_FILE
     os.makedirs(os.path.dirname(WEIGHTS_FILE), exist_ok=True)
-    print("[ECHO] Telechargement du modele RIFE (~21 Mo)...")
+    print("[ECHO] Telechargement du modele RIFE de repli (~21 Mo)...")
     tmp = WEIGHTS_FILE + ".part"
     urllib.request.urlretrieve(WEIGHTS_URL, tmp)
     if _sha256(tmp) != WEIGHTS_SHA256:
         os.remove(tmp)
         raise RuntimeError("modele RIFE telecharge corrompu")
     os.replace(tmp, WEIGHTS_FILE)
-    print("[ECHO] Modele RIFE pret.")
+    print("[ECHO] Modele RIFE de repli pret.")
     return WEIGHTS_FILE
+
+
+def _trouver_poids_superslo():
+    """Chemin des poids flownet_v4.26.pkl, ou None.
+    Une copie trouvee dans l'installation SUPER SLO 600 est dupliquee dans
+    models/ pour qu'echo-cam reste autonome ensuite."""
+    if os.path.exists(LOCAL_PKL):
+        return LOCAL_PKL
+    source = os.path.join(SUPERSLO_DIR, "slowcam", SUPERSLO_PKL)
+    if not os.path.exists(source):
+        source = None
+        if os.path.isdir(SUPERSLO_DIR):     # le dossier a pu bouger
+            for racine, _, fichiers in os.walk(SUPERSLO_DIR):
+                if SUPERSLO_PKL in fichiers:
+                    source = os.path.join(racine, SUPERSLO_PKL)
+                    break
+    if source is None:
+        return None
+    try:
+        os.makedirs(os.path.dirname(LOCAL_PKL), exist_ok=True)
+        shutil.copy2(source, LOCAL_PKL)
+        _journal(f"poids superslo copies : {source} -> models/{SUPERSLO_PKL}")
+        return LOCAL_PKL
+    except OSError as e:
+        _journal(f"copie des poids superslo impossible ({e}), "
+                 f"utilisation directe de {source}")
+        return source
 
 
 class RifeInterpolator:
@@ -80,48 +132,74 @@ class RifeInterpolator:
                          f"build CUDA {torch.version.cuda}) : verifier que "
                          f"lancer.bat a bien installe torch cu124")
                 return
-            path = _ensure_weights()
-
-            from rife_arch import IFNet
             self.device = torch.device("cuda" if torch.cuda.is_available()
                                        else "cpu")
-            # demi-precision + autotune cudnn : necessaires pour tenir
-            # 60 im/s (budget 16,7 ms par image interpolee)
-            self.autocast = self.device.type == "cuda"
-            if self.autocast:
+            # FP16 reel (methode superslo) : poids et tenseurs en demi-
+            # precision — necessaire pour tenir 60 im/s (budget 16,7 ms)
+            self.fp16 = self.device.type == "cuda"
+            if self.fp16:
                 torch.backends.cudnn.benchmark = True
-            net = IFNet(arch_ver=ARCH_VER)
-            sd = torch.load(path, map_location="cpu", weights_only=True)
-            sd = {k.replace("module.", ""): v for k, v in sd.items()}
-            net.load_state_dict(sd)
-            net.eval().to(self.device)
-            self.net = net
+
+            chemin = _trouver_poids_superslo()
+            if chemin is not None:
+                try:
+                    self.net = self._charger(chemin, "4.26")
+                    self.modele, self.arch = "RIFE 4.26 superslo", "4.26"
+                except Exception as e:
+                    _journal(f"poids superslo illisibles ou incompatibles "
+                             f"({chemin}) : {e} -> repli sur RIFE 4.9")
+                    chemin = None
+            if chemin is None:
+                _journal(f"poids superslo introuvables (models/{SUPERSLO_PKL}"
+                         f" puis {SUPERSLO_DIR}) : repli sur RIFE 4.9 — "
+                         f"verifier dir C:\\Users\\evalh\\SUPERSLO")
+                self.net = self._charger(_ensure_weights(), "4.7")
+                self.modele, self.arch = "RIFE 4.9 repli", "4.7"
+            self.scale_list = SCALE_LISTS[self.arch]
+
             self._warmup()
             # ok seulement une fois le warm-up passe : une init a moitie
             # reussie ferait planter la boucle d'affichage a chaque image
             self.ok = True
-            self.status = f"RIFE 4.9 pret ({self.device.type.upper()})"
+            self.status = (f"{self.modele} pret ({self.device.type.upper()}"
+                           f"{', fp16' if self.fp16 else ''})")
             nom_gpu = (torch.cuda.get_device_name(0)
                        if self.device.type == "cuda" else "CPU")
             h, w = self._warmup_size
-            _journal(f"verif GPU : modele sur {next(net.parameters()).device}"
-                     f" ({nom_gpu}) | fp16 autocast : "
-                     f"{'oui' if self.autocast else 'non'} | warm-up {w}x{h} "
-                     f"synchronise : pleine {self.warmup_ms['pleine']:.1f} ms,"
-                     f" demi {self.warmup_ms['demi']:.1f} ms | memoire GPU "
+            _journal(f"verif GPU : {self.modele} sur "
+                     f"{next(self.net.parameters()).device} ({nom_gpu}) | "
+                     f"fp16 reel : {'oui' if self.fp16 else 'non'} | "
+                     f"warm-up {w}x{h} synchronise : pleine "
+                     f"{self.warmup_ms['pleine']:.1f} ms, demi "
+                     f"{self.warmup_ms['demi']:.1f} ms | memoire GPU "
                      f"{self.gpu_mem_mb()} Mo")
         except Exception as e:
             self.status = f"RIFE : erreur ({type(e).__name__})"
             _journal(f"init impossible : {e}\n{traceback.format_exc()}")
 
+    def _charger(self, chemin, arch):
+        """Charge un jeu de poids sur le device (en FP16 reel sur CUDA)."""
+        torch = self._torch
+        from rife_arch import IFNet
+        net = IFNet(arch_ver=arch)
+        sd = torch.load(chemin, map_location="cpu", weights_only=True)
+        sd = {k.replace("module.", ""): v for k, v in sd.items()}
+        net.load_state_dict(sd)
+        net.eval().to(self.device)
+        if self.fp16:
+            net = net.half()
+        return net
+
     def _warmup(self):
-        """Passages a vide a la taille reelle des images (pleine et demie) :
-        initialise les kernels CUDA et l'autotune cudnn, puis chronometre un
-        passage synchronise par palier — c'est la preuve mesuree de
-        l'execution GPU (un 720p en ~10 ms est impossible sur CPU)."""
+        """Chauffe GPU (comme slowcam) : passages a vide a la taille reelle
+        des images (pleine et demie), qui initialisent les kernels CUDA et
+        l'autotune cudnn, puis un passage synchronise chronometre par
+        palier — c'est la preuve mesuree de l'execution GPU (un 720p en
+        ~10 ms est impossible sur CPU)."""
         import numpy as np
         torch = self._torch
         vide = np.zeros((*self._warmup_size, 3), np.uint8)
+        debut = time.monotonic()
         self.warmup_ms = {}
         for half, nom in ((False, "pleine"), (True, "demi")):
             for _ in range(2):
@@ -134,6 +212,7 @@ class RifeInterpolator:
                 torch.cuda.synchronize()
             self.warmup_ms[nom] = (time.monotonic() - t0) * 1000.0
             self._cache_key = None
+        _journal(f"chauffe GPU : {time.monotonic() - debut:.1f} s")
 
     def gpu_mem_mb(self):
         """Memoire GPU allouee par ce processus (Mo) ; 0 hors CUDA."""
@@ -143,8 +222,9 @@ class RifeInterpolator:
 
     def _to_tensor(self, img):
         torch = self._torch
-        return (torch.from_numpy(img).to(self.device)
-                .permute(2, 0, 1).unsqueeze(0).float() / 255.0)
+        t = (torch.from_numpy(img).to(self.device)
+             .permute(2, 0, 1).unsqueeze(0).float() / 255.0)
+        return t.half() if self.fp16 else t
 
     def interpolate(self, img0, img1, t, pair_key=None, half=False):
         """Image intermediaire entre img0 et img1 (BGR uint8) a l'instant t.
@@ -154,7 +234,8 @@ class RifeInterpolator:
         gardes en cache, seul t change (economise les transferts CPU->GPU).
         half : interpole en demi-resolution puis remonte a la taille d'origine
         (~4x moins cher) — mode degrade quand la pleine resolution ne tient
-        pas dans le budget des 60 im/s.
+        pas dans le budget des 60 im/s. (Sans rapport avec le FP16, qui est
+        la precision de calcul, active en permanence sur CUDA.)
         """
         import cv2
         torch = self._torch
@@ -170,13 +251,8 @@ class RifeInterpolator:
                 self._t0, self._t1 = self._to_tensor(a), self._to_tensor(b)
                 self._cache_key = key
             t0, t1 = self._t0, self._t1
-            if self.autocast:
-                with torch.autocast("cuda", dtype=torch.float16):
-                    out = self.net(t0, t1, timestep=float(t),
-                                   scale_list=SCALE_LIST, training=False)
-            else:
-                out = self.net(t0, t1, timestep=float(t),
-                               scale_list=SCALE_LIST, training=False)
+            out = self.net(t0, t1, timestep=float(t),
+                           scale_list=self.scale_list, training=False)
             out = (out[0].float().clamp(0, 1) * 255.0).byte()
             res = out.permute(1, 2, 0).contiguous().cpu().numpy()
         if half:
