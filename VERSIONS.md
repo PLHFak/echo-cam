@@ -6,6 +6,17 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.11 — 28-09-2026 · Spec V1 : panneau web, distance IA, reset (tag v1)
+- **Panneau de contrôle HTML** (`controle.html`, double-clic sur
+  `panneau.bat`) relié à l'app par un pont WebSocket local : état en direct,
+  9 curseurs, options, versions de réglages — tout à chaud, sans redémarrer.
+- **Distance par profondeur IA** : Depth Anything V2 metric (GPU, fp16),
+  lue au centre du torse — stable quand la personne pivote, sans calibration.
+  Secours « largeur d'épaules » conservé (touche D, bascule auto en panne).
+- **Reset de position** activable/désactivable (touche T) : OFF, le retard
+  acquis reste — la personne peut demeurer décalée dans le temps.
+- Les versions de réglages mémorisent aussi l'état du reset.
+
 ## v1.10 — 27-09-2026 · Spec V1 de l'architecte : 3 zones, HUD, versions baptisées
 - **Trois zones** : figé (< 0,5 m, hystérésis 10 cm) · ralenti 0→1 (0,5→2 m) ·
   accélération progressive 1→Vmax (2→3 m) · rattrapage plein (> 3 m).
