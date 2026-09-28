@@ -42,6 +42,7 @@ import numpy as np
 import mediapipe as mp
 
 from rife_interp import RifeInterpolator
+from depth import DepthEstimator
 
 ECHO_VERSION   = "1.10"
 
@@ -327,16 +328,31 @@ class Shared:
         self.fps_cam    = 0.0       # cadence camera mesuree
         self.stable_secs = STABLE_SECONDS   # ecrit par l'affichage
         self.smooth_window = SMOOTH_WINDOW  # lissage distance (curseur)
+        self.depth_mode  = "epaules"        # "ia" (Depth Anything) ou "epaules"
+        self.depth_ms    = 0.0              # cout d'une inference profondeur
         self.want_max_frames = max_frames   # redimensionnement demande du buffer
         self.calib_request   = False        # touche C
         self.cam_drops       = 0            # images camera manquantes (debug)
         self.pose_ms         = 0.0          # cout d'une analyse de posture
 
 
-def capture_thread(cap, pose, st):
+def torso_center(landmarks):
+    """Centre du torse (epaules 11-12, hanches 23-24) en coordonnees
+    normalisees ; tete (0) en secours. None si rien de visible."""
+    pts = [landmarks[i] for i in (11, 12, 23, 24) if landmarks[i].visibility > 0.5]
+    if not pts and landmarks[0].visibility > 0.5:
+        pts = [landmarks[0]]
+    if not pts:
+        return None
+    return (float(np.mean([p.x for p in pts])),
+            float(np.mean([p.y for p in pts])))
+
+
+def capture_thread(cap, pose, st, depth):
     """Capture + detection de posture + estimation de distance, a la cadence
     de la camera. L'affichage tourne dans la boucle principale, a part."""
     widths       = deque(maxlen=30)     # fenetre de lissage max (curseur)
+    dists        = deque(maxlen=30)     # distances profondeur IA recentes
     anchor_w     = None    # largeur d'epaules au debut de l'immobilite
     stable_since = 0.0
     last_dist    = None
@@ -396,21 +412,46 @@ def capture_thread(cap, pose, st):
 
         distance = None
         if res.pose_landmarks:
-            sw = shoulder_width_px(res.pose_landmarks.landmark, ws, hs)
-            if sw:
-                widths.append(sw)
-                sw_smooth = moyenne()
+            lm = res.pose_landmarks.landmark
 
-                # immobile depuis stable_secs (±STABLE_TOL) ? -> nouvelle ref
-                if anchor_w is None or abs(sw_smooth - anchor_w) > STABLE_TOL * anchor_w:
-                    anchor_w, stable_since = sw_smooth, now
-                elif now - stable_since >= st.stable_secs:
-                    st.ref_width = sw_smooth
-                    anchor_w, stable_since = sw_smooth, now
+            # --- methode principale : profondeur IA au centre du torse ---
+            if st.depth_mode == "ia" and depth is not None and depth.ok:
+                centre = torso_center(lm)
+                if centre is not None:
+                    try:
+                        d_raw = depth.distance_at(small, centre[0], centre[1])
+                    except Exception as e:      # panne GPU -> secours epaules
+                        depth.ok = False
+                        depth.status = (f"Profondeur IA : erreur "
+                                        f"({type(e).__name__}) -> secours epaules")
+                        st.depth_mode = "epaules"
+                        debug_log("profondeur", f"erreur d'inference, passage "
+                                                f"en secours epaules : {e}")
+                        d_raw = None
+                    st.depth_ms = depth.last_ms
+                    if d_raw is not None:
+                        dists.append(d_raw)
+                        k = max(1, int(st.smooth_window))
+                        distance = float(np.mean(list(dists)[-k:]))
+                        last_dist, last_seen = distance, now
 
-                if st.ref_width:
-                    distance = CALIB_DISTANCE * (st.ref_width / sw_smooth)
-                    last_dist, last_seen = distance, now
+            # --- secours : largeur d'epaules (calibration a 2 m) ---
+            if distance is None and st.depth_mode != "ia":
+                sw = shoulder_width_px(lm, ws, hs)
+                if sw:
+                    widths.append(sw)
+                    sw_smooth = moyenne()
+
+                    # immobile depuis stable_secs (±STABLE_TOL) ? -> nouvelle ref
+                    if anchor_w is None or abs(sw_smooth - anchor_w) > STABLE_TOL * anchor_w:
+                        anchor_w, stable_since = sw_smooth, now
+                    elif now - stable_since >= st.stable_secs:
+                        st.ref_width = sw_smooth
+                        anchor_w, stable_since = sw_smooth, now
+
+                    if st.ref_width:
+                        distance = CALIB_DISTANCE * (st.ref_width / sw_smooth)
+                        last_dist, last_seen = distance, now
 
         # --- personne perdue : garder la derniere distance, puis salle vide ---
         if distance is None and last_dist is not None:
@@ -431,6 +472,10 @@ def main():
     # telecharge les poids au premier lancement ; warm-up a la taille reelle
     rife = RifeInterpolator(warmup_size=(CAP_HEIGHT, CAP_WIDTH))
     print(f"[ECHO] {rife.status}")
+
+    # distance par profondeur IA (spec V1 §2) ; secours epaules si absente
+    depth = DepthEstimator()
+    print(f"[ECHO] {depth.status}")
     debug_log("config", f"ECHO v{ECHO_VERSION} | {cuda_txt} | {rife.status} | "
                         f"rendu vise {RENDER_FPS} im/s (budget "
                         f"{1000.0 / RENDER_FPS:.1f} ms) | camera demandee "
@@ -450,7 +495,8 @@ def main():
                                   min_tracking_confidence=0.5)
 
     st = Shared(int(BUFFER_SECONDS * FPS))
-    worker = threading.Thread(target=capture_thread, args=(cap, pose, st),
+    st.depth_mode = "ia" if depth.ok else "epaules"
+    worker = threading.Thread(target=capture_thread, args=(cap, pose, st, depth),
                               daemon=True)
     worker.start()
 
@@ -644,7 +690,7 @@ def main():
             c_ms = rife_costs[rife_mode] * 1000.0
             rife_txt = f"RIFE {rife_mode} res ({c_ms:.1f} ms)"
             rife_ok = rife_mode == "pleine"
-        if st.ref_width is None:
+        if st.depth_mode != "ia" and st.ref_width is None:
             rounded_box(out, 24, out.shape[0] - 84, 700, out.shape[0] - 24)
             hud_text(out, f"Restez immobile {st.stable_secs:.0f} s "
                           f"(ou touche C) pour calibrer",
@@ -671,8 +717,11 @@ def main():
                  f"Retard : {delay:.1f} s", distance is not None),
                 (f"Camera : {st.fps_cam:.0f} im/s   Rendu : {fps_render:.0f} im/s",
                  fps_render > RENDER_FPS - 3),
-                (f"Reference : {'calibree' if st.ref_width else 'en attente'}",
-                 st.ref_width is not None),
+                (f"Distance : {'IA ' + f'{st.depth_ms:.0f} ms' if st.depth_mode == 'ia' else 'epaules (secours)'}",
+                 st.depth_mode == "ia"),
+                (f"Reference : "
+                 f"{'auto (IA)' if st.depth_mode == 'ia' else ('calibree' if st.ref_width else 'en attente')}",
+                 st.depth_mode == "ia" or st.ref_width is not None),
                 (f"Buffer : {len(st.buffer) / FPS:.0f} / {buffer_s} s", True),
                 (f"Versions : {liste[:44]}", True),
                 (f"Anomalies : cam {st.cam_drops}  retard {late}  saut {jumps}",
@@ -743,6 +792,8 @@ def main():
             break
         if key in (ord('i'), ord('I')):
             rife_on = not rife_on
+        if key in (ord('d'), ord('D')) and depth.ok:   # IA <-> epaules
+            st.depth_mode = "epaules" if st.depth_mode == "ia" else "ia"
         if key in (ord('h'), ord('H')):         # mode HUD
             hud_mode = (hud_mode + 1) % len(HUD_MODES)
         if key in (ord('s'), ord('S')):         # sauver une version nommee

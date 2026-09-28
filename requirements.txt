@@ -4,3 +4,4 @@ opencv-contrib-python
 numpy
 torch==2.5.1+cu124
 torchvision==0.20.1+cu124
+transformers==4.49.0
