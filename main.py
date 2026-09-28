@@ -2,12 +2,14 @@
 Projet ECHO — Jouer avec le temps (spec V1 de l'architecte)
 -----------------------------------------------------------
 La webcam filme la personne ; sa distance a l'ecran pilote la vitesse de
-lecture, en TROIS zones :
-  d <= Arret (0,5 m)          -> FIGE          (v = 0)
-  Arret  < d < Direct (2 m)   -> RALENTI       (v de 0 a 1, lineaire)
+lecture, en TROIS zones (vitesse plancher Vmin, consigne superslo 28/09) :
+  d <= Arret (0,5 m)          -> RAMPE         (v = Vmin, jamais fige)
+  Arret  < d < Direct (2 m)   -> RALENTI       (v de Vmin a 1, lineaire)
   Direct < d < Accel (3 m)    -> ACCELERATION  (v de 1 a Vmax, lineaire)
   d >= Accel                  -> rattrapage plein (v = Vmax)
 Le retard se resorbe tant que v > 1 ; a zero, la lecture reste en direct.
+v = 0 (arret total) n'est plus un etat permanent : l'image continue
+toujours de ramper, le retard reste borne (plus de ralenti infini).
 Transitions douces : la distance ET la vitesse sont lissees (double lissage),
 avec hysteresis anti-oscillation au seuil de gel.
 
@@ -43,7 +45,7 @@ import mediapipe as mp
 
 from rife_interp import RifeInterpolator
 
-ECHO_VERSION   = "1.10"
+ECHO_VERSION   = "1.11"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau, touche P)
@@ -58,10 +60,13 @@ RENDER_FPS     = 60       # cadence d'affichage : ecran 60 Hz (la camera, elle,
 LIVE_LATENCY   = 1.5 / FPS  # ~50 ms de latence fixe pour toujours avoir deux
                             # images autour de l'instant affiche
 
-DIST_STOP      = 0.5      # m — en dessous, image figee
+DIST_STOP      = 0.5      # m — en dessous, l'image RAMPE a Vmin
 DIST_FULL      = 2.0      # m — en phase (v = 1)
 DIST_ACCEL     = 3.0      # m — rattrapage plein (v = Vmax)
 VMAX           = 2.5      # vitesse max de rattrapage
+VMIN           = 0.03     # 3% — vitesse plancher : l'image avance toujours,
+                          # jamais totalement figee -> le retard reste borne
+                          # (v = 0 : cas limite bref, jamais permanent)
 BUFFER_SECONDS = 12       # profondeur memoire (12 s * 30 fps * 720p ~ 1 Go RAM)
 SMOOTH_WINDOW  = 8        # lissage de la distance (nb de mesures)
 SMOOTH_SPEED   = 0.15     # lissage de la vitesse (0 = fige, 1 = instantane)
@@ -105,14 +110,17 @@ def gpu_status():
 # ---------------------------------------------------------------------------
 def speed_target(d, p):
     """Vitesse cible selon les trois zones de distance (sans lissage).
+    Vitesse plancher vmin (consigne superslo) : sous le seuil d'arret,
+    l'image rampe a vmin au lieu de figer — le retard reste borne.
     d = None signifie : pas de calibration ou salle vide -> rattrapage plein
     (une fois le retard a zero, la lecture reste simplement en direct)."""
     if d is None:
         return p["vmax"]
     if d <= p["stop"]:
-        return 0.0
+        return p["vmin"]
     if d < p["full"]:
-        return (d - p["stop"]) / (p["full"] - p["stop"])
+        return p["vmin"] + ((d - p["stop"]) / (p["full"] - p["stop"])
+                            * (1.0 - p["vmin"]))
     if d < p["accel"]:
         return 1.0 + (d - p["full"]) / (p["accel"] - p["full"]) * (p["vmax"] - 1.0)
     return p["vmax"]
@@ -178,6 +186,7 @@ PANEL_DEFAULTS = {
     "Direct (cm)":      (int(DIST_FULL * 100),   500),
     "Accel (cm)":       (int(DIST_ACCEL * 100),  600),
     "Vmax x10":         (int(VMAX * 10),         60),
+    "Vmin %":           (int(VMIN * 100),        25),
     "Buffer (s)":       (BUFFER_SECONDS,         60),
     "Lissage dist":     (SMOOTH_WINDOW,          30),
     "Lissage vit x100": (int(SMOOTH_SPEED * 100), 100),
@@ -187,13 +196,14 @@ PANEL_DEFAULTS = {
 
 PANEL_HELP = [
     "Curseurs — R = defauts, P = masquer, S = sauver version",
-    "Arret (50) : plus pres, FIGE",
+    "Arret (50) : plus pres, RAMPE a Vmin (jamais fige)",
     "Direct (200) : EN PHASE (v=1) ; entre les 2 : RALENTI",
     "Accel (300) : v monte de 1 a Vmax entre Direct et Accel",
     "Vmax (x2.5) : vitesse de rattrapage plein",
+    "Vmin (3%) : vitesse plancher, le retard reste borne",
     "Buffer (12 s) : memoire d'images = retard maxi",
     "Lissage dist (8) / vit (0.15) : transitions douces",
-    "Hysteresis (10 cm) : anti-oscillation au seuil FIGE",
+    "Hysteresis (10 cm) : anti-oscillation au seuil RAMPE",
     "Immobilite (10 s) : duree avant nouvelle reference",
 ]
 
@@ -224,6 +234,7 @@ def params_from_positions(g):
         "full":         max(20, g["Direct (cm)"]) / 100.0,
         "accel":        max(30, g["Accel (cm)"]) / 100.0,
         "vmax":         max(10, g["Vmax x10"]) / 10.0,
+        "vmin":         g["Vmin %"] / 100.0,
         "buffer_s":     max(2,  g["Buffer (s)"]),
         "smooth_win":   max(1,  g["Lissage dist"]),
         "smooth_speed": max(1,  g["Lissage vit x100"]) / 100.0,
@@ -256,7 +267,7 @@ def panel_draw(lines):
 # HUD incruste dans l'image (touche H : complet / vitesse / aucun)
 # ---------------------------------------------------------------------------
 ETAT_COLORS = {
-    "FIGE":         (70, 70, 255),
+    "RAMPE":        (70, 70, 255),
     "RALENTI":      (0, 190, 255),
     "EN PHASE":     (120, 255, 120),
     "ACCELERATION": (255, 190, 80),
@@ -456,7 +467,7 @@ def main():
 
     delay       = 0.0       # retard courant (s) par rapport au direct
     v_smooth    = 1.0       # vitesse lissee (double lissage, spec §1)
-    frozen      = False     # etat FIGE avec hysteresis
+    frozen      = False     # etat RAMPE (ex-FIGE) avec hysteresis
     stable_keys = None      # duree fixee par les touches 1..0 (prioritaire)
     rife_on     = True      # touche I
     hud_mode    = 0         # index dans HUD_MODES (touche H)
@@ -544,7 +555,7 @@ def main():
             frozen = distance <= p["stop"] + p["hyst"]
         else:
             frozen = distance <= p["stop"]
-        v_cible = 0.0 if frozen else speed_target(distance, p)
+        v_cible = p["vmin"] if frozen else speed_target(distance, p)
         v_smooth += (v_cible - v_smooth) * p["smooth_speed"]
         delay += (1.0 - v_smooth) * dt
 
@@ -626,8 +637,8 @@ def main():
 
         # --- HUD (spec §3) ---
         v_eff = v_smooth if delay > 0.0 else min(v_smooth, 1.0)
-        if frozen or (distance is not None and v_cible == 0.0):
-            etat = "FIGE"
+        if frozen:
+            etat = "RAMPE"
         elif distance is not None and distance < p["full"]:
             etat = "RALENTI"
         elif delay > 0.05 and v_smooth > 1.02:
