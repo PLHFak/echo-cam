@@ -42,6 +42,8 @@ import numpy as np
 import mediapipe as mp
 
 from rife_interp import RifeInterpolator
+from depth import DepthEstimator
+from bridge import Bridge
 
 ECHO_VERSION   = "1.10"
 
@@ -296,7 +298,7 @@ def hud_draw(img, mode, info):
                  ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
         return
     # mode complet
-    rounded_box(img, 24, 24, 470, 268)
+    rounded_box(img, 24, 24, 470, 268 + (28 if info.get("extra") else 0))
     hud_text(img, info["etat"], 44, 66, 1.0,
              ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
     d_txt = f"{info['distance']:.2f} m" if info["distance"] else "--"
@@ -309,6 +311,8 @@ def hud_draw(img, mode, info):
         f"   {CAP_WIDTH}x{CAP_HEIGHT}",
         info["rife"],
     ]
+    if info.get("extra"):
+        lignes.append(info["extra"])
     for i, txt in enumerate(lignes):
         hud_text(img, txt, 44, 102 + 28 * i, 0.62)
 
@@ -327,16 +331,31 @@ class Shared:
         self.fps_cam    = 0.0       # cadence camera mesuree
         self.stable_secs = STABLE_SECONDS   # ecrit par l'affichage
         self.smooth_window = SMOOTH_WINDOW  # lissage distance (curseur)
+        self.depth_mode  = "epaules"        # "ia" (Depth Anything) ou "epaules"
+        self.depth_ms    = 0.0              # cout d'une inference profondeur
         self.want_max_frames = max_frames   # redimensionnement demande du buffer
         self.calib_request   = False        # touche C
         self.cam_drops       = 0            # images camera manquantes (debug)
         self.pose_ms         = 0.0          # cout d'une analyse de posture
 
 
-def capture_thread(cap, pose, st):
+def torso_center(landmarks):
+    """Centre du torse (epaules 11-12, hanches 23-24) en coordonnees
+    normalisees ; tete (0) en secours. None si rien de visible."""
+    pts = [landmarks[i] for i in (11, 12, 23, 24) if landmarks[i].visibility > 0.5]
+    if not pts and landmarks[0].visibility > 0.5:
+        pts = [landmarks[0]]
+    if not pts:
+        return None
+    return (float(np.mean([p.x for p in pts])),
+            float(np.mean([p.y for p in pts])))
+
+
+def capture_thread(cap, pose, st, depth):
     """Capture + detection de posture + estimation de distance, a la cadence
     de la camera. L'affichage tourne dans la boucle principale, a part."""
     widths       = deque(maxlen=30)     # fenetre de lissage max (curseur)
+    dists        = deque(maxlen=30)     # distances profondeur IA recentes
     anchor_w     = None    # largeur d'epaules au debut de l'immobilite
     stable_since = 0.0
     last_dist    = None
@@ -396,21 +415,46 @@ def capture_thread(cap, pose, st):
 
         distance = None
         if res.pose_landmarks:
-            sw = shoulder_width_px(res.pose_landmarks.landmark, ws, hs)
-            if sw:
-                widths.append(sw)
-                sw_smooth = moyenne()
+            lm = res.pose_landmarks.landmark
 
-                # immobile depuis stable_secs (±STABLE_TOL) ? -> nouvelle ref
-                if anchor_w is None or abs(sw_smooth - anchor_w) > STABLE_TOL * anchor_w:
-                    anchor_w, stable_since = sw_smooth, now
-                elif now - stable_since >= st.stable_secs:
-                    st.ref_width = sw_smooth
-                    anchor_w, stable_since = sw_smooth, now
+            # --- methode principale : profondeur IA au centre du torse ---
+            if st.depth_mode == "ia" and depth is not None and depth.ok:
+                centre = torso_center(lm)
+                if centre is not None:
+                    try:
+                        d_raw = depth.distance_at(small, centre[0], centre[1])
+                    except Exception as e:      # panne GPU -> secours epaules
+                        depth.ok = False
+                        depth.status = (f"Profondeur IA : erreur "
+                                        f"({type(e).__name__}) -> secours epaules")
+                        st.depth_mode = "epaules"
+                        debug_log("profondeur", f"erreur d'inference, passage "
+                                                f"en secours epaules : {e}")
+                        d_raw = None
+                    st.depth_ms = depth.last_ms
+                    if d_raw is not None:
+                        dists.append(d_raw)
+                        k = max(1, int(st.smooth_window))
+                        distance = float(np.mean(list(dists)[-k:]))
+                        last_dist, last_seen = distance, now
 
-                if st.ref_width:
-                    distance = CALIB_DISTANCE * (st.ref_width / sw_smooth)
-                    last_dist, last_seen = distance, now
+            # --- secours : largeur d'epaules (calibration a 2 m) ---
+            if distance is None and st.depth_mode != "ia":
+                sw = shoulder_width_px(lm, ws, hs)
+                if sw:
+                    widths.append(sw)
+                    sw_smooth = moyenne()
+
+                    # immobile depuis stable_secs (±STABLE_TOL) ? -> nouvelle ref
+                    if anchor_w is None or abs(sw_smooth - anchor_w) > STABLE_TOL * anchor_w:
+                        anchor_w, stable_since = sw_smooth, now
+                    elif now - stable_since >= st.stable_secs:
+                        st.ref_width = sw_smooth
+                        anchor_w, stable_since = sw_smooth, now
+
+                    if st.ref_width:
+                        distance = CALIB_DISTANCE * (st.ref_width / sw_smooth)
+                        last_dist, last_seen = distance, now
 
         # --- personne perdue : garder la derniere distance, puis salle vide ---
         if distance is None and last_dist is not None:
@@ -431,6 +475,14 @@ def main():
     # telecharge les poids au premier lancement ; warm-up a la taille reelle
     rife = RifeInterpolator(warmup_size=(CAP_HEIGHT, CAP_WIDTH))
     print(f"[ECHO] {rife.status}")
+
+    # distance par profondeur IA (spec V1 §2) ; secours epaules si absente
+    depth = DepthEstimator()
+    print(f"[ECHO] {depth.status}")
+
+    # pont local pour l'interface HTML (spec V1 §1)
+    bridge = Bridge()
+    print(f"[ECHO] {bridge.status}")
     debug_log("config", f"ECHO v{ECHO_VERSION} | {cuda_txt} | {rife.status} | "
                         f"rendu vise {RENDER_FPS} im/s (budget "
                         f"{1000.0 / RENDER_FPS:.1f} ms) | camera demandee "
@@ -450,7 +502,8 @@ def main():
                                   min_tracking_confidence=0.5)
 
     st = Shared(int(BUFFER_SECONDS * FPS))
-    worker = threading.Thread(target=capture_thread, args=(cap, pose, st),
+    st.depth_mode = "ia" if depth.ok else "epaules"
+    worker = threading.Thread(target=capture_thread, args=(cap, pose, st, depth),
                               daemon=True)
     worker.start()
 
@@ -459,6 +512,7 @@ def main():
     frozen      = False     # etat FIGE avec hysteresis
     stable_keys = None      # duree fixee par les touches 1..0 (prioritaire)
     rife_on     = True      # touche I
+    reset_on    = True      # touche T : rattrapage du direct autorise (spec §3)
     hud_mode    = 0         # index dans HUD_MODES (touche H)
     naming      = None      # texte en cours de frappe (touche S), sinon None
     fps_render  = 0.0
@@ -502,7 +556,7 @@ def main():
         rife_mode, rife_costs = "pleine", {"pleine": 0.0, "demi": 0.0}
 
     def charger_version(nom):
-        nonlocal active_preset, saved_positions
+        nonlocal active_preset, saved_positions, reset_on
         vals = presets.get(nom)
         if vals is None:
             return
@@ -510,6 +564,7 @@ def main():
             panel_apply(vals)
         saved_positions = {n: int(vals.get(n, d)) for n, (d, _) in
                            PANEL_DEFAULTS.items()}
+        reset_on = bool(vals.get("_reset", True))
         active_preset = nom
         reset_run()
         debug_log("presets", f"version '{nom}' chargee")
@@ -526,6 +581,56 @@ def main():
             late += 1
             debug_log("rendu", f"cycle de {dt * 1000:.0f} ms (budget "
                                f"{budget * 1000:.0f} ms, total {late})")
+
+        # --- commandes du panneau web (appliquees a chaud) ---
+        for cmd in bridge.poll():
+            try:
+                t = cmd.get("t")
+                if t == "reglage" and cmd.get("nom") in PANEL_DEFAULTS:
+                    nom_c = cmd["nom"]
+                    maxi = PANEL_DEFAULTS[nom_c][1]
+                    val = max(0, min(int(cmd.get("v", 0)), maxi))
+                    saved_positions[nom_c] = val
+                    if panel_visible:
+                        cv2.setTrackbarPos(nom_c, WIN_PANEL, val)
+                elif t == "option":
+                    nom_o, v_o = cmd.get("nom"), cmd.get("v")
+                    if nom_o == "interpolation":
+                        rife_on = bool(v_o)
+                    elif nom_o == "reset":
+                        reset_on = bool(v_o)
+                    elif nom_o == "profondeur" and depth.ok:
+                        st.depth_mode = "ia" if v_o else "epaules"
+                    elif nom_o == "hud" and v_o in HUD_MODES:
+                        hud_mode = HUD_MODES.index(v_o)
+                elif t == "defauts":
+                    saved_positions = {n: d for n, (d, _) in PANEL_DEFAULTS.items()}
+                    if panel_visible:
+                        panel_apply(saved_positions)
+                    stable_keys = None
+                elif t == "version":
+                    action, nom_v = cmd.get("action"), str(cmd.get("nom", ""))
+                    if action == "charger":
+                        charger_version(nom_v)
+                    elif action == "sauver" and nom_v.strip():
+                        presets[nom_v.strip()[:24]] = dict(saved_positions,
+                                                           _reset=reset_on)
+                        presets_save(presets)
+                        active_preset = nom_v.strip()[:24]
+                    elif action == "supprimer" and nom_v in presets:
+                        del presets[nom_v]
+                        presets_save(presets)
+                        if active_preset == nom_v:
+                            active_preset = None
+                    elif action == "renommer" and nom_v in presets:
+                        nouveau = str(cmd.get("nouveau", "")).strip()[:24]
+                        if nouveau and nouveau not in presets:
+                            presets[nouveau] = presets.pop(nom_v)
+                            presets_save(presets)
+                            if active_preset == nom_v:
+                                active_preset = nouveau
+            except Exception as e:              # jamais fatal pour l'affichage
+                debug_log("web", f"commande invalide {cmd} : {e}")
 
         if panel_visible:
             saved_positions = panel_positions()
@@ -545,6 +650,8 @@ def main():
         else:
             frozen = distance <= p["stop"]
         v_cible = 0.0 if frozen else speed_target(distance, p)
+        if not reset_on:                # reset OFF : jamais plus vite que le direct,
+            v_cible = min(v_cible, 1.0) # le retard acquis reste (spec §3)
         v_smooth += (v_cible - v_smooth) * p["smooth_speed"]
         delay += (1.0 - v_smooth) * dt
 
@@ -644,7 +751,7 @@ def main():
             c_ms = rife_costs[rife_mode] * 1000.0
             rife_txt = f"RIFE {rife_mode} res ({c_ms:.1f} ms)"
             rife_ok = rife_mode == "pleine"
-        if st.ref_width is None:
+        if st.depth_mode != "ia" and st.ref_width is None:
             rounded_box(out, 24, out.shape[0] - 84, 700, out.shape[0] - 24)
             hud_text(out, f"Restez immobile {st.stable_secs:.0f} s "
                           f"(ou touche C) pour calibrer",
@@ -655,6 +762,7 @@ def main():
             "device": "GPU" if (rife.ok and cuda_ok) else "CPU",
             "fps_r": fps_render, "fps_c": st.fps_cam,
             "rife": rife_txt, "naming": naming,
+            "extra": None if reset_on else "reset OFF : le retard reste (T)",
         })
 
         # --- panneau (rafraichi a ~10 Hz, masquable touche P) ---
@@ -671,14 +779,38 @@ def main():
                  f"Retard : {delay:.1f} s", distance is not None),
                 (f"Camera : {st.fps_cam:.0f} im/s   Rendu : {fps_render:.0f} im/s",
                  fps_render > RENDER_FPS - 3),
-                (f"Reference : {'calibree' if st.ref_width else 'en attente'}",
-                 st.ref_width is not None),
+                (f"Distance : {'IA ' + f'{st.depth_ms:.0f} ms' if st.depth_mode == 'ia' else 'epaules (secours)'}",
+                 st.depth_mode == "ia"),
+                (f"Reference : "
+                 f"{'auto (IA)' if st.depth_mode == 'ia' else ('calibree' if st.ref_width else 'en attente')}",
+                 st.depth_mode == "ia" or st.ref_width is not None),
                 (f"Buffer : {len(st.buffer) / FPS:.0f} / {buffer_s} s", True),
                 (f"Versions : {liste[:44]}", True),
                 (f"Anomalies : cam {st.cam_drops}  retard {late}  saut {jumps}",
                  st.cam_drops + late + jumps == 0),
-                ("Touches : C I H S P R fleches Q", True),
+                (f"Reset position : {'ON' if reset_on else 'OFF (retard garde)'}",
+                 reset_on),
+                ("Touches : C D I T H S P R fleches Q", True),
             ])
+        # --- etat pour le panneau web (~10 Hz) ---
+        if n_frame % 6 == 0:
+            bridge.publish({
+                "etat": etat, "v": v_eff, "retard": delay,
+                "distance": distance, "device": "GPU" if (rife.ok and cuda_ok) else "CPU",
+                "fps_r": fps_render, "fps_c": st.fps_cam,
+                "rife": rife_txt,
+                "profondeur": (f"Profondeur : IA ({st.depth_ms:.0f} ms)"
+                               if st.depth_mode == "ia"
+                               else f"Profondeur : epaules (secours) - {depth.status}"),
+                "profondeur_dispo": depth.ok,
+                "reglages": dict(saved_positions),
+                "options": {"interpolation": rife_on, "reset": reset_on,
+                            "profondeur_ia": st.depth_mode == "ia",
+                            "hud": HUD_MODES[hud_mode]},
+                "versions": {"liste": sorted(presets), "active": active_preset},
+                "version_app": ECHO_VERSION,
+            })
+
         cv2.imshow(WIN_MAIN, out)
         t_draw = time.monotonic()
 
@@ -726,7 +858,7 @@ def main():
             if key == 13 or key == 10:          # Entree -> sauver
                 nom = naming.strip()
                 if nom:
-                    presets[nom] = dict(saved_positions)
+                    presets[nom] = dict(saved_positions, _reset=reset_on)
                     presets_save(presets)
                     active_preset = nom
                     debug_log("presets", f"version '{nom}' sauvegardee")
@@ -743,6 +875,10 @@ def main():
             break
         if key in (ord('i'), ord('I')):
             rife_on = not rife_on
+        if key in (ord('d'), ord('D')) and depth.ok:   # IA <-> epaules
+            st.depth_mode = "epaules" if st.depth_mode == "ia" else "ia"
+        if key in (ord('t'), ord('T')):                # reset de position on/off
+            reset_on = not reset_on
         if key in (ord('h'), ord('H')):         # mode HUD
             hud_mode = (hud_mode + 1) % len(HUD_MODES)
         if key in (ord('s'), ord('S')):         # sauver une version nommee

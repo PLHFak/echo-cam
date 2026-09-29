@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ECHO — Contrôle</title>
+<style>
+  :root{
+    --fond:#101216; --carte:#191c22; --bord:#262b33; --texte:#e8eaed;
+    --sourd:#9aa2ad; --accent:#4fc3f7; --ok:#7ee787; --alerte:#ff7b72;
+    --fige:#ff6b6b; --ralenti:#ffc94d; --phase:#7ee787; --accel:#74b9ff;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--fond);color:var(--texte);
+       font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:18px}
+  h1{font-size:19px;margin:0 0 14px;display:flex;align-items:center;gap:10px}
+  h1 small{color:var(--sourd);font-weight:400}
+  #dot{width:10px;height:10px;border-radius:50%;background:var(--alerte)}
+  #dot.ok{background:var(--ok)}
+  .grille{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+          max-width:1180px}
+  .carte{background:var(--carte);border:1px solid var(--bord);border-radius:12px;
+         padding:16px}
+  .carte h2{font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+            color:var(--sourd);margin:0 0 12px}
+  /* --- etat en direct --- */
+  #etat{font-size:30px;font-weight:700;padding:6px 14px;border-radius:10px;
+        display:inline-block;background:#0006}
+  .tuiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .tuile{background:#0004;border-radius:10px;padding:10px 12px}
+  .tuile b{font-size:24px;font-weight:600;display:block}
+  .tuile span{color:var(--sourd);font-size:12px}
+  .ligne{color:var(--sourd);font-size:13px;margin-top:10px}
+  /* --- curseurs --- */
+  .curseur{display:grid;grid-template-columns:150px 1fr 64px;gap:10px;
+           align-items:center;margin:9px 0}
+  .curseur label{color:var(--sourd);font-size:13px}
+  .curseur output{text-align:right;font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent);height:22px}
+  /* --- options --- */
+  .opt{display:flex;justify-content:space-between;align-items:center;margin:10px 0}
+  .inter{position:relative;width:46px;height:24px;flex:none}
+  .inter input{opacity:0;width:0;height:0}
+  .inter i{position:absolute;inset:0;background:#3a4150;border-radius:24px;
+           transition:.15s;cursor:pointer}
+  .inter i:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;
+                  background:#fff;border-radius:50%;transition:.15s}
+  .inter input:checked+i{background:var(--accent)}
+  .inter input:checked+i:before{transform:translateX(22px)}
+  .inter input:disabled+i{opacity:.35;cursor:default}
+  select,input[type=text]{background:#0006;color:var(--texte);
+      border:1px solid var(--bord);border-radius:8px;padding:6px 10px;font:inherit}
+  /* --- versions --- */
+  .puces{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .puce{background:#0006;border:1px solid var(--bord);border-radius:999px;
+        padding:6px 14px;cursor:pointer}
+  .puce.active{border-color:var(--accent);color:var(--accent)}
+  button{background:#242b36;color:var(--texte);border:1px solid var(--bord);
+         border-radius:8px;padding:7px 14px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  .rang{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .note{color:var(--sourd);font-size:12px;margin-top:10px}
+</style>
+</head>
+<body>
+<h1><span id="dot"></span> ECHO — panneau de contrôle
+    <small id="lien">connexion…</small></h1>
+<div class="grille">
+
+  <div class="carte">
+    <h2>État en direct</h2>
+    <span id="etat">—</span>
+    <div class="tuiles">
+      <div class="tuile"><b id="vit">—</b><span>vitesse</span></div>
+      <div class="tuile"><b id="ret">—</b><span>retard</span></div>
+      <div class="tuile"><b id="dist">—</b><span>distance</span></div>
+      <div class="tuile"><b id="fps">—</b><span id="dev">rendu / caméra</span></div>
+    </div>
+    <div class="ligne" id="rife">—</div>
+    <div class="ligne" id="prof">—</div>
+  </div>
+
+  <div class="carte">
+    <h2>Réglages</h2>
+    <div id="curseurs"></div>
+  </div>
+
+  <div class="carte">
+    <h2>Options</h2>
+    <div class="opt"><span>Interpolation RIFE (ralenti fluide)</span>
+      <label class="inter"><input type="checkbox" id="o_interp"><i></i></label></div>
+    <div class="opt"><span>Reset de position (rattrapage du direct)</span>
+      <label class="inter"><input type="checkbox" id="o_reset"><i></i></label></div>
+    <div class="opt"><span>Distance par profondeur IA</span>
+      <label class="inter"><input type="checkbox" id="o_ia"><i></i></label></div>
+    <div class="opt"><span>Fond virtuel <small style="color:var(--sourd)">(V2, à venir)</small></span>
+      <label class="inter"><input type="checkbox" disabled><i></i></label></div>
+    <div class="opt"><span>HUD incrusté</span>
+      <select id="o_hud"><option>complet</option><option>vitesse</option>
+      <option>aucun</option></select></div>
+    <div class="rang" style="margin-top:14px">
+      <button id="b_defauts">Valeurs par défaut</button>
+    </div>
+  </div>
+
+  <div class="carte">
+    <h2>Versions de réglages</h2>
+    <div class="puces" id="puces"></div>
+    <div class="rang">
+      <input type="text" id="v_nom" placeholder="nom de version" maxlength="24">
+      <button id="b_sauver">Sauver</button>
+      <button id="b_renommer">Renommer l'active</button>
+      <button id="b_supprimer">Supprimer l'active</button>
+    </div>
+    <div class="note">Clic sur une version pour la charger (le run repart à zéro).
+      Flèches ←/→ : version précédente / suivante.</div>
+  </div>
+
+</div>
+<script>
+"use strict";
+const CURSEURS = [
+  // [cle serveur, libelle, min, max, affichage]
+  ["Arret (cm)",       "Arrêt (figé)",      10, 300, v => (v/100).toFixed(2)+" m"],
+  ["Direct (cm)",      "Direct (v = 1)",    20, 500, v => (v/100).toFixed(2)+" m"],
+  ["Accel (cm)",       "Accélération",      30, 600, v => (v/100).toFixed(2)+" m"],
+  ["Vmax x10",         "Vitesse max",       10,  60, v => "x"+(v/10).toFixed(1)],
+  ["Buffer (s)",       "Buffer",             2,  60, v => v+" s"],
+  ["Lissage dist",     "Lissage distance",   1,  30, v => v],
+  ["Lissage vit x100", "Lissage vitesse",    1, 100, v => (v/100).toFixed(2)],
+  ["Hysteresis (cm)",  "Hystérésis",         0,  50, v => v+" cm"],
+  ["Immobilite (s)",   "Immobilité",         1,  30, v => v+" s"],
+];
+const COULEURS = {"FIGE":"var(--fige)","RALENTI":"var(--ralenti)",
+                  "EN PHASE":"var(--phase)","ACCELERATION":"var(--accel)"};
+const $ = id => document.getElementById(id);
+let ws = null, drag = null, versions = [], active = null;
+
+// --- curseurs ---
+const boite = $("curseurs");
+for (const [cle, lib, min, max, fmt] of CURSEURS) {
+  const d = document.createElement("div");
+  d.className = "curseur";
+  d.innerHTML = `<label>${lib}</label>
+    <input type="range" min="${min}" max="${max}" data-cle="${cle}">
+    <output></output>`;
+  const r = d.querySelector("input"), o = d.querySelector("output");
+  r.addEventListener("pointerdown", () => drag = cle);
+  r.addEventListener("pointerup",   () => drag = null);
+  r.addEventListener("input", () => {
+    o.textContent = fmt(+r.value);
+    envoyer({t:"reglage", nom:cle, v:+r.value});
+  });
+  boite.appendChild(d);
+}
+
+function envoyer(m){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+
+function majCurseurs(regl){
+  for (const [cle,,,, fmt] of CURSEURS){
+    if (cle === drag) continue;              // pas pendant le glisser
+    const r = boite.querySelector(`[data-cle="${cle}"]`);
+    if (r && regl[cle] !== undefined && +r.value !== regl[cle]){
+      r.value = regl[cle];
+      r.parentElement.querySelector("output").textContent = fmt(regl[cle]);
+    } else if (r) {
+      r.parentElement.querySelector("output").textContent = fmt(+r.value);
+    }
+  }
+}
+
+function majEtat(s){
+  $("etat").textContent = s.etat;
+  $("etat").style.color = COULEURS[s.etat] || "var(--texte)";
+  $("vit").textContent  = "x" + s.v.toFixed(2);
+  $("ret").textContent  = s.retard.toFixed(1) + " s";
+  $("dist").textContent = s.distance ? s.distance.toFixed(2) + " m" : "—";
+  $("fps").textContent  = s.fps_r.toFixed(0) + " / " + s.fps_c.toFixed(0);
+  $("dev").textContent  = s.device + " — rendu / caméra (im/s)";
+  $("rife").textContent = s.rife;
+  $("prof").textContent = s.profondeur;
+  if (document.activeElement !== $("o_hud")) $("o_hud").value = s.options.hud;
+  $("o_interp").checked = s.options.interpolation;
+  $("o_reset").checked  = s.options.reset;
+  $("o_ia").checked     = s.options.profondeur_ia;
+  $("o_ia").disabled    = !s.profondeur_dispo;
+  versions = s.versions.liste; active = s.versions.active;
+  const p = $("puces"); p.innerHTML = "";
+  for (const n of versions){
+    const b = document.createElement("span");
+    b.className = "puce" + (n === active ? " active" : "");
+    b.textContent = n;
+    b.onclick = () => envoyer({t:"version", action:"charger", nom:n});
+    p.appendChild(b);
+  }
+  if (!versions.length) p.innerHTML =
+    '<span class="note">aucune version sauvée</span>';
+}
+
+$("o_interp").onchange = e => envoyer({t:"option", nom:"interpolation", v:e.target.checked});
+$("o_reset").onchange  = e => envoyer({t:"option", nom:"reset",         v:e.target.checked});
+$("o_ia").onchange     = e => envoyer({t:"option", nom:"profondeur",    v:e.target.checked});
+$("o_hud").onchange    = e => envoyer({t:"option", nom:"hud",           v:e.target.value});
+$("b_defauts").onclick = () => envoyer({t:"defauts"});
+$("b_sauver").onclick  = () => { const n = $("v_nom").value.trim();
+  if (n) { envoyer({t:"version", action:"sauver", nom:n}); $("v_nom").value = ""; } };
+$("b_renommer").onclick = () => { const n = $("v_nom").value.trim();
+  if (n && active) { envoyer({t:"version", action:"renommer", nom:active, nouveau:n});
+                     $("v_nom").value = ""; } };
+$("b_supprimer").onclick = () => { if (active &&
+  confirm(`Supprimer la version « ${active} » ?`))
+  envoyer({t:"version", action:"supprimer", nom:active}); };
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowRight" || e.key === "ArrowLeft"){
+    if (!versions.length) return;
+    let i = versions.indexOf(active);
+    i = (i + (e.key === "ArrowRight" ? 1 : -1) + versions.length) % versions.length;
+    envoyer({t:"version", action:"charger", nom:versions[i]});
+  }
+});
+
+// --- connexion (re-essai automatique) ---
+function connecter(){
+  ws = new WebSocket("ws://localhost:8765");
+  ws.onopen  = () => { $("dot").className = "ok";
+                       $("lien").textContent = "connecté à l'application"; };
+  ws.onclose = () => { $("dot").className = "";
+                       $("lien").textContent = "app fermée ? reconnexion…";
+                       setTimeout(connecter, 1000); };
+  ws.onmessage = ev => {
+    const s = JSON.parse(ev.data);
+    majEtat(s);
+    majCurseurs(s.reglages);
+  };
+}
+connecter();
+</script>
+</body>
+</html>
