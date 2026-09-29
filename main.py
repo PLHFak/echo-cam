@@ -45,7 +45,7 @@ from rife_interp import RifeInterpolator
 from depth import DepthEstimator
 from bridge import Bridge
 
-ECHO_VERSION   = "1.10"
+ECHO_VERSION   = "1.12"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau, touche P)
@@ -62,9 +62,12 @@ LIVE_LATENCY   = 1.5 / FPS  # ~50 ms de latence fixe pour toujours avoir deux
 
 DIST_STOP      = 0.5      # m — en dessous, image figee
 DIST_FULL      = 2.0      # m — en phase (v = 1)
-DIST_ACCEL     = 3.0      # m — rattrapage plein (v = Vmax)
-VMAX           = 2.5      # vitesse max de rattrapage
-BUFFER_SECONDS = 12       # profondeur memoire (12 s * 30 fps * 720p ~ 1 Go RAM)
+DIST_ACCEL     = 4.0      # m — rattrapage plein (v = Vmax)
+VMAX           = 2.0      # vitesse max de rattrapage
+VMIN           = 0.10     # plancher de vitesse quand quelqu'un est present :
+                          # a 10 %, l'image ne fige jamais completement (0 = fige)
+DIST_SCALE     = 1.0      # correction d'echelle de la distance IA (touche C a 2 m)
+BUFFER_SECONDS = 30       # profondeur memoire = retard maxi (30 s * 720p ~ 2.5 Go RAM)
 SMOOTH_WINDOW  = 8        # lissage de la distance (nb de mesures)
 SMOOTH_SPEED   = 0.15     # lissage de la vitesse (0 = fige, 1 = instantane)
 HYSTERESIS     = 0.1      # m — anti-oscillation au seuil de gel
@@ -180,6 +183,8 @@ PANEL_DEFAULTS = {
     "Direct (cm)":      (int(DIST_FULL * 100),   500),
     "Accel (cm)":       (int(DIST_ACCEL * 100),  600),
     "Vmax x10":         (int(VMAX * 10),         60),
+    "Vmin (%)":         (int(VMIN * 100),        50),
+    "Echelle dist (%)": (int(DIST_SCALE * 100),  250),
     "Buffer (s)":       (BUFFER_SECONDS,         60),
     "Lissage dist":     (SMOOTH_WINDOW,          30),
     "Lissage vit x100": (int(SMOOTH_SPEED * 100), 100),
@@ -192,8 +197,10 @@ PANEL_HELP = [
     "Arret (50) : plus pres, FIGE",
     "Direct (200) : EN PHASE (v=1) ; entre les 2 : RALENTI",
     "Accel (300) : v monte de 1 a Vmax entre Direct et Accel",
-    "Vmax (x2.5) : vitesse de rattrapage plein",
-    "Buffer (12 s) : memoire d'images = retard maxi",
+    "Vmax (x2) : vitesse de rattrapage plein",
+    "Vmin (10%) : plancher - l'image ne fige jamais sous ce %",
+    "Echelle dist (100%) : correction de la distance IA (C a 2 m)",
+    "Buffer (30 s) : memoire d'images = retard maxi",
     "Lissage dist (8) / vit (0.15) : transitions douces",
     "Hysteresis (10 cm) : anti-oscillation au seuil FIGE",
     "Immobilite (10 s) : duree avant nouvelle reference",
@@ -226,6 +233,8 @@ def params_from_positions(g):
         "full":         max(20, g["Direct (cm)"]) / 100.0,
         "accel":        max(30, g["Accel (cm)"]) / 100.0,
         "vmax":         max(10, g["Vmax x10"]) / 10.0,
+        "vmin":         g["Vmin (%)"] / 100.0,
+        "echelle":      max(25, g["Echelle dist (%)"]) / 100.0,
         "buffer_s":     max(2,  g["Buffer (s)"]),
         "smooth_win":   max(1,  g["Lissage dist"]),
         "smooth_speed": max(1,  g["Lissage vit x100"]) / 100.0,
@@ -293,9 +302,10 @@ def hud_draw(img, mode, info):
     if mode == "aucun":
         return
     if mode == "vitesse":
-        rounded_box(img, 24, 24, 240, 92)
-        hud_text(img, f"x{info['v']:.2f}", 44, 74, 1.5,
+        rounded_box(img, 24, 24, 300, 120)
+        hud_text(img, f"{info['v'] * 100:.0f} %", 44, 74, 1.5,
                  ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
+        hud_text(img, f"retard {info['retard']:.1f} s", 44, 106, 0.62)
         return
     # mode complet
     rounded_box(img, 24, 24, 470, 268 + (28 if info.get("extra") else 0))
@@ -303,7 +313,7 @@ def hud_draw(img, mode, info):
              ETAT_COLORS.get(info["etat"], (235, 235, 235)), 2)
     d_txt = f"{info['distance']:.2f} m" if info["distance"] else "--"
     lignes = [
-        f"vitesse   x{info['v']:.2f}",
+        f"vitesse   {info['v'] * 100:.0f} %",
         f"retard    {info['retard']:5.1f} s",
         f"distance  {d_txt}",
         f"version   {info['version']}",
@@ -643,6 +653,8 @@ def main():
 
         # --- vitesse cible (3 zones) + gel avec hysteresis + double lissage ---
         distance = st.distance
+        if distance is not None and st.depth_mode == "ia":
+            distance *= p["echelle"]        # correction d'echelle (touche C a 2 m)
         if distance is None:
             frozen = False
         elif frozen:
@@ -650,6 +662,8 @@ def main():
         else:
             frozen = distance <= p["stop"]
         v_cible = 0.0 if frozen else speed_target(distance, p)
+        if distance is not None and p["vmin"] > 0.0:
+            v_cible = max(v_cible, p["vmin"])   # plancher : ne fige jamais sous Vmin
         if not reset_on:                # reset OFF : jamais plus vite que le direct,
             v_cible = min(v_cible, 1.0) # le retard acquis reste (spec §3)
         v_smooth += (v_cible - v_smooth) * p["smooth_speed"]
@@ -733,7 +747,7 @@ def main():
 
         # --- HUD (spec §3) ---
         v_eff = v_smooth if delay > 0.0 else min(v_smooth, 1.0)
-        if frozen or (distance is not None and v_cible == 0.0):
+        if distance is not None and v_cible <= 0.001:
             etat = "FIGE"
         elif distance is not None and distance < p["full"]:
             etat = "RALENTI"
@@ -773,7 +787,7 @@ def main():
             panel_draw([
                 (cuda_txt, cuda_ok),
                 (rife_txt, rife_ok),
-                (f"Etat : {etat}   Vitesse : x{v_eff:.2f}", True),
+                (f"Etat : {etat}   Vitesse : {v_eff * 100:.0f} %", True),
                 (f"Distance : "
                  f"{f'{distance:.2f} m' if distance else '--'}   "
                  f"Retard : {delay:.1f} s", distance is not None),
@@ -893,7 +907,17 @@ def main():
                 panel_apply(saved_positions)
                 panel_visible = True
         if key in (ord('c'), ord('C')):
-            st.calib_request = True
+            if st.depth_mode == "ia":           # recalage : je suis a 2 m
+                if st.distance:
+                    e = int(round(100.0 * CALIB_DISTANCE / st.distance))
+                    e = max(25, min(250, e))
+                    saved_positions["Echelle dist (%)"] = e
+                    if panel_visible:
+                        cv2.setTrackbarPos("Echelle dist (%)", WIN_PANEL, e)
+                    debug_log("profondeur", f"recalage a {CALIB_DISTANCE} m : "
+                                            f"echelle {e} %")
+            else:
+                st.calib_request = True
             delay = 0.0
         if key in (ord('r'), ord('R')):         # valeurs par defaut
             if panel_visible:
