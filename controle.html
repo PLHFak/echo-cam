@@ -6,75 +6,130 @@
 <title>ECHO — Contrôle</title>
 <style>
   :root{
-    --fond:#101216; --carte:#191c22; --bord:#262b33; --texte:#e8eaed;
-    --sourd:#9aa2ad; --accent:#4fc3f7; --ok:#7ee787; --alerte:#ff7b72;
-    --fige:#ff6b6b; --ralenti:#ffc94d; --phase:#7ee787; --accel:#74b9ff;
+    --fond:#0b0d12; --carte:#151922; --bord:#283040;
+    --texte:#eef1f6; --sourd:#93a0b4; --accent:#4fc3f7;
+    --fige:#ff5d5d; --ralenti:#ffb84d; --phase:#5ddb8a; --accel:#6ea8ff;
   }
   *{box-sizing:border-box} html,body{margin:0}
-  body{background:var(--fond);color:var(--texte);
-       font:15px/1.45 system-ui,Segoe UI,Roboto,sans-serif;padding:18px}
-  h1{font-size:19px;margin:0 0 14px;display:flex;align-items:center;gap:10px}
-  h1 small{color:var(--sourd);font-weight:400}
-  #dot{width:10px;height:10px;border-radius:50%;background:var(--alerte)}
-  #dot.ok{background:var(--ok)}
-  .grille{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
-          max-width:1180px}
-  .carte{background:var(--carte);border:1px solid var(--bord);border-radius:12px;
-         padding:16px}
-  .carte h2{font-size:12px;letter-spacing:.12em;text-transform:uppercase;
-            color:var(--sourd);margin:0 0 12px}
-  /* --- etat en direct --- */
-  #etat{font-size:30px;font-weight:700;padding:6px 14px;border-radius:10px;
-        display:inline-block;background:#0006}
-  .tuiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
-  .tuile{background:#0004;border-radius:10px;padding:10px 12px}
-  .tuile b{font-size:24px;font-weight:600;display:block}
-  .tuile span{color:var(--sourd);font-size:12px}
+  body{background:radial-gradient(1200px 500px at 20% -10%, #16263a 0%, var(--fond) 55%);
+       color:var(--texte);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;
+       padding:20px;min-height:100vh}
+  header{display:flex;align-items:baseline;gap:14px;max-width:1200px;margin:0 auto 16px}
+  header h1{font-size:22px;margin:0;letter-spacing:.04em}
+  header h1 b{color:var(--accent)}
+  #lien{color:var(--sourd);font-size:13px}
+  #dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+       background:var(--fige);margin-right:6px;vertical-align:1px}
+  #dot.ok{background:var(--phase)}
+  .grille{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
+          max-width:1200px;margin:0 auto}
+  .carte{background:linear-gradient(180deg,#1a2130,var(--carte));
+         border:1px solid var(--bord);border-radius:16px;padding:18px 20px;
+         box-shadow:0 8px 24px #0006}
+  .carte.large{grid-column:1/-1}
+  .carte h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+            color:var(--sourd);margin:0 0 14px}
+  /* ---- bulles d'aide ---- */
+  .aide{display:inline-flex;align-items:center;justify-content:center;
+        width:17px;height:17px;border-radius:50%;background:#2c3648;
+        color:var(--accent);font-size:11px;font-weight:700;cursor:help;
+        margin-left:6px;position:relative;flex:none}
+  .aide:hover::after{content:attr(data-t);position:absolute;left:50%;bottom:24px;
+        transform:translateX(-50%);width:270px;background:#0e1420;color:var(--texte);
+        border:1px solid var(--accent);border-radius:10px;padding:10px 12px;
+        font-size:12.5px;font-weight:400;line-height:1.45;z-index:10;
+        box-shadow:0 10px 30px #000a;white-space:normal}
+  /* ---- etat en direct ---- */
+  .etatligne{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  #etat{font-size:26px;font-weight:800;padding:8px 18px;border-radius:12px;
+        background:#0007;letter-spacing:.03em}
+  .jauge{flex:1;min-width:220px}
+  .jauge .barre{height:14px;background:#0008;border-radius:7px;overflow:hidden}
+  .jauge .barre i{display:block;height:100%;width:0%;background:var(--phase);
+                  border-radius:7px;transition:width .15s,background .3s}
+  .jauge small{color:var(--sourd)}
+  #vitpc{font-size:34px;font-weight:800;min-width:110px;text-align:right;
+         font-variant-numeric:tabular-nums}
+  .tuiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+          gap:10px;margin-top:14px}
+  .tuile{background:#0006;border-radius:12px;padding:10px 14px}
+  .tuile b{font-size:21px;font-weight:650;display:block;font-variant-numeric:tabular-nums}
+  .tuile span{color:var(--sourd);font-size:12px;display:flex;align-items:center}
   .ligne{color:var(--sourd);font-size:13px;margin-top:10px}
-  /* --- curseurs --- */
-  .curseur{display:grid;grid-template-columns:150px 1fr 64px;gap:10px;
-           align-items:center;margin:9px 0}
-  .curseur label{color:var(--sourd);font-size:13px}
-  .curseur output{text-align:right;font-variant-numeric:tabular-nums}
+  /* ---- schema des zones ---- */
+  .zones{position:relative;height:64px;margin:26px 6px 4px}
+  .zones .seg{position:absolute;top:22px;height:16px}
+  .zones .lab{position:absolute;top:44px;font-size:11.5px;color:var(--sourd);
+              transform:translateX(-50%);white-space:nowrap}
+  .zones .lim{position:absolute;top:14px;height:30px;width:2px;background:#fff5;
+              transform:translateX(-50%)}
+  .zones .limlab{position:absolute;top:-6px;font-size:11.5px;color:var(--texte);
+              transform:translateX(-50%);font-variant-numeric:tabular-nums}
+  #moi{position:absolute;top:10px;width:14px;height:14px;border-radius:50%;
+       background:#fff;border:3px solid var(--accent);transform:translateX(-50%);
+       transition:left .2s;box-shadow:0 0 12px var(--accent)}
+  /* ---- curseurs ---- */
+  .curseur{display:grid;grid-template-columns:170px 1fr 66px;gap:12px;
+           align-items:center;margin:10px 0}
+  .curseur label{color:var(--sourd);font-size:13.5px;display:flex;align-items:center}
+  .curseur output{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
   input[type=range]{width:100%;accent-color:var(--accent);height:22px}
-  /* --- options --- */
-  .opt{display:flex;justify-content:space-between;align-items:center;margin:10px 0}
+  /* ---- options ---- */
+  .opt{display:flex;justify-content:space-between;align-items:center;margin:11px 0}
+  .opt>span{display:flex;align-items:center}
   .inter{position:relative;width:46px;height:24px;flex:none}
   .inter input{opacity:0;width:0;height:0}
-  .inter i{position:absolute;inset:0;background:#3a4150;border-radius:24px;
+  .inter i{position:absolute;inset:0;background:#39445a;border-radius:24px;
            transition:.15s;cursor:pointer}
   .inter i:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;
                   background:#fff;border-radius:50%;transition:.15s}
   .inter input:checked+i{background:var(--accent)}
   .inter input:checked+i:before{transform:translateX(22px)}
-  .inter input:disabled+i{opacity:.35;cursor:default}
-  select,input[type=text]{background:#0006;color:var(--texte);
-      border:1px solid var(--bord);border-radius:8px;padding:6px 10px;font:inherit}
-  /* --- versions --- */
+  .inter input:disabled+i{opacity:.3;cursor:default}
+  select,input[type=text]{background:#0007;color:var(--texte);
+      border:1px solid var(--bord);border-radius:9px;padding:7px 11px;font:inherit}
+  /* ---- versions ---- */
   .puces{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
-  .puce{background:#0006;border:1px solid var(--bord);border-radius:999px;
-        padding:6px 14px;cursor:pointer}
-  .puce.active{border-color:var(--accent);color:var(--accent)}
-  button{background:#242b36;color:var(--texte);border:1px solid var(--bord);
-         border-radius:8px;padding:7px 14px;font:inherit;cursor:pointer}
+  .puce{background:#0007;border:1px solid var(--bord);border-radius:999px;
+        padding:6px 16px;cursor:pointer;transition:.12s}
+  .puce:hover{border-color:var(--accent)}
+  .puce.active{border-color:var(--accent);color:var(--accent);
+               box-shadow:0 0 10px #4fc3f733}
+  button{background:#232c3d;color:var(--texte);border:1px solid var(--bord);
+         border-radius:9px;padding:8px 16px;font:inherit;cursor:pointer;transition:.12s}
   button:hover{border-color:var(--accent)}
   .rang{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .note{color:var(--sourd);font-size:12px;margin-top:10px}
 </style>
 </head>
 <body>
-<h1><span id="dot"></span> ECHO — panneau de contrôle
-    <small id="lien">connexion…</small></h1>
+<header>
+  <h1><b>ECHO</b> — panneau de contrôle</h1>
+  <span id="lien"><span id="dot"></span>connexion…</span>
+</header>
 <div class="grille">
 
-  <div class="carte">
+  <div class="carte large">
     <h2>État en direct</h2>
-    <span id="etat">—</span>
+    <div class="etatligne">
+      <span id="etat">—</span>
+      <div class="jauge">
+        <div class="barre"><i id="vitbar"></i></div>
+        <small>vitesse de lecture (100 % = direct)</small>
+      </div>
+      <span id="vitpc">—</span>
+    </div>
+    <div class="zones" id="zones">
+      <div class="seg" style="left:0"></div>
+      <span id="moi" style="left:-30px"></span>
+    </div>
     <div class="tuiles">
-      <div class="tuile"><b id="vit">—</b><span>vitesse</span></div>
-      <div class="tuile"><b id="ret">—</b><span>retard</span></div>
-      <div class="tuile"><b id="dist">—</b><span>distance</span></div>
+      <div class="tuile"><b id="ret">—</b><span>retard
+        <i class="aide" data-t="Décalage entre ce que montre l'écran et le direct. Il grandit quand la lecture est ralentie, et se résorbe quand elle accélère. Limité par le Buffer.">?</i></span></div>
+      <div class="tuile"><b id="dist">—</b><span>distance
+        <i class="aide" data-t="Distance personne–caméra mesurée par l'IA de profondeur (Depth Anything). Si elle est fausse d'un facteur constant, corrigez avec « Échelle distance » ou la touche C à 2 m.">?</i></span></div>
       <div class="tuile"><b id="fps">—</b><span id="dev">rendu / caméra</span></div>
+      <div class="tuile"><b id="verapp">—</b><span>version app</span></div>
     </div>
     <div class="ligne" id="rife">—</div>
     <div class="ligne" id="prof">—</div>
@@ -87,23 +142,28 @@
 
   <div class="carte">
     <h2>Options</h2>
-    <div class="opt"><span>Interpolation RIFE (ralenti fluide)</span>
+    <div class="opt"><span>Interpolation RIFE
+      <i class="aide" data-t="Le GPU fabrique les images intermédiaires : ralenti parfaitement fluide et écran alimenté à 60 im/s. À couper uniquement pour comparer.">?</i></span>
       <label class="inter"><input type="checkbox" id="o_interp"><i></i></label></div>
-    <div class="opt"><span>Reset de position (rattrapage du direct)</span>
+    <div class="opt"><span>Reset de position
+      <i class="aide" data-t="ON : en reculant, la lecture accélère et rattrape le direct (le retard revient à zéro). OFF : le retard acquis reste — la personne demeure décalée dans le temps.">?</i></span>
       <label class="inter"><input type="checkbox" id="o_reset"><i></i></label></div>
-    <div class="opt"><span>Distance par profondeur IA</span>
+    <div class="opt"><span>Distance par profondeur IA
+      <i class="aide" data-t="Mesure la distance avec une carte de profondeur calculée par IA (stable même quand on pivote). Décoché : ancienne méthode par largeur d'épaules (secours, demande une calibration).">?</i></span>
       <label class="inter"><input type="checkbox" id="o_ia"><i></i></label></div>
-    <div class="opt"><span>Fond virtuel <small style="color:var(--sourd)">(V2, à venir)</small></span>
+    <div class="opt"><span>Fond virtuel <small style="color:var(--sourd)">&nbsp;(V2, à venir)</small></span>
       <label class="inter"><input type="checkbox" disabled><i></i></label></div>
-    <div class="opt"><span>HUD incrusté</span>
+    <div class="opt"><span>Monitoring à l'écran (HUD)
+      <i class="aide" data-t="Ce qui est incrusté sur l'image vidéo : « complet » = état, vitesse %, retard, distance… ; « vitesse » = vitesse % et retard seulement ; « aucun » = image pure.">?</i></span>
       <select id="o_hud"><option>complet</option><option>vitesse</option>
       <option>aucun</option></select></div>
     <div class="rang" style="margin-top:14px">
       <button id="b_defauts">Valeurs par défaut</button>
+      <i class="aide" data-t="Revient à la configuration de référence : arrêt 50 cm, direct 2 m, accélération jusqu'à 4 m, vitesse max ×2, plancher 10 %, buffer 30 s.">?</i>
     </div>
   </div>
 
-  <div class="carte">
+  <div class="carte large">
     <h2>Versions de réglages</h2>
     <div class="puces" id="puces"></div>
     <div class="rang">
@@ -111,25 +171,38 @@
       <button id="b_sauver">Sauver</button>
       <button id="b_renommer">Renommer l'active</button>
       <button id="b_supprimer">Supprimer l'active</button>
+      <i class="aide" data-t="Une « version » = l'ensemble des réglages et options, sous un nom. Sauvée dans presets.json, elle survit au redémarrage. Charger une version remet le run à zéro (buffer et retard).">?</i>
     </div>
-    <div class="note">Clic sur une version pour la charger (le run repart à zéro).
-      Flèches ←/→ : version précédente / suivante.</div>
+    <div class="note">Clic sur une version pour la charger. Flèches ←/→ : précédente / suivante.</div>
   </div>
 
 </div>
 <script>
 "use strict";
 const CURSEURS = [
-  // [cle serveur, libelle, min, max, affichage]
-  ["Arret (cm)",       "Arrêt (figé)",      10, 300, v => (v/100).toFixed(2)+" m"],
-  ["Direct (cm)",      "Direct (v = 1)",    20, 500, v => (v/100).toFixed(2)+" m"],
-  ["Accel (cm)",       "Accélération",      30, 600, v => (v/100).toFixed(2)+" m"],
-  ["Vmax x10",         "Vitesse max",       10,  60, v => "x"+(v/10).toFixed(1)],
-  ["Buffer (s)",       "Buffer",             2,  60, v => v+" s"],
-  ["Lissage dist",     "Lissage distance",   1,  30, v => v],
-  ["Lissage vit x100", "Lissage vitesse",    1, 100, v => (v/100).toFixed(2)],
-  ["Hysteresis (cm)",  "Hystérésis",         0,  50, v => v+" cm"],
-  ["Immobilite (s)",   "Immobilité",         1,  30, v => v+" s"],
+  // [cle serveur, libelle, min, max, affichage, definition]
+  ["Arret (cm)", "Arrêt", 10, 300, v=>(v/100).toFixed(2)+" m",
+   "Plus près que cette distance, la lecture est au minimum (figée si le plancher Vmin est à 0)."],
+  ["Direct (cm)", "Direct (100 %)", 20, 500, v=>(v/100).toFixed(2)+" m",
+   "À cette distance, la lecture est exactement au rythme du direct (100 %). Entre Arrêt et Direct : ralenti progressif."],
+  ["Accel (cm)", "Accélération max", 30, 600, v=>(v/100).toFixed(2)+" m",
+   "Au-delà de Direct, la lecture accélère progressivement ; à cette distance elle atteint la vitesse max et résorbe le retard."],
+  ["Vmax x10", "Vitesse max", 10, 60, v=>(v*10)+" %",
+   "Vitesse de rattrapage du direct quand on est loin. 200 % = deux fois la vitesse normale."],
+  ["Vmin (%)", "Vitesse plancher", 0, 50, v=>v+" %",
+   "La lecture ne descend jamais sous ce pourcentage tant que quelqu'un est présent. À 10 %, l'image ne fige jamais complètement ; à 0, elle fige sous Arrêt."],
+  ["Echelle dist (%)", "Échelle distance", 25, 250, v=>v+" %",
+   "Correction de la distance mesurée par l'IA. Si l'écran affiche 2 m alors que vous êtes à 1 m, mettez 50 %. Ou placez-vous à 2 m et pressez C dans la fenêtre vidéo : la correction se règle toute seule."],
+  ["Buffer (s)", "Buffer (retard max)", 2, 60, v=>v+" s",
+   "Mémoire d'images : c'est le retard maximum possible. 30 s en 720p ≈ 2,5 Go de RAM."],
+  ["Lissage dist", "Lissage distance", 1, 30, v=>v,
+   "Nombre de mesures moyennées : plus haut = distance plus stable mais réaction plus lente."],
+  ["Lissage vit x100", "Lissage vitesse", 1, 100, v=>(v/100).toFixed(2),
+   "Douceur des changements de vitesse : bas = très doux, 1.00 = instantané."],
+  ["Hysteresis (cm)", "Hystérésis", 0, 50, v=>v+" cm",
+   "Marge anti-oscillation au seuil d'arrêt : une fois figé, il faut reculer de cette marge pour repartir."],
+  ["Immobilite (s)", "Immobilité", 1, 30, v=>v+" s",
+   "Mode épaules uniquement : durée sans bouger avant que la position devienne la nouvelle référence."],
 ];
 const COULEURS = {"FIGE":"var(--fige)","RALENTI":"var(--ralenti)",
                   "EN PHASE":"var(--phase)","ACCELERATION":"var(--accel)"};
@@ -138,10 +211,10 @@ let ws = null, drag = null, versions = [], active = null;
 
 // --- curseurs ---
 const boite = $("curseurs");
-for (const [cle, lib, min, max, fmt] of CURSEURS) {
+for (const [cle, lib, min, max, fmt, def] of CURSEURS) {
   const d = document.createElement("div");
   d.className = "curseur";
-  d.innerHTML = `<label>${lib}</label>
+  d.innerHTML = `<label>${lib}<i class="aide" data-t="${def}">?</i></label>
     <input type="range" min="${min}" max="${max}" data-cle="${cle}">
     <output></output>`;
   const r = d.querySelector("input"), o = d.querySelector("output");
@@ -155,28 +228,64 @@ for (const [cle, lib, min, max, fmt] of CURSEURS) {
 }
 
 function envoyer(m){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+const val = cle => +boite.querySelector(`[data-cle="${cle}"]`).value;
 
 function majCurseurs(regl){
   for (const [cle,,,, fmt] of CURSEURS){
-    if (cle === drag) continue;              // pas pendant le glisser
     const r = boite.querySelector(`[data-cle="${cle}"]`);
-    if (r && regl[cle] !== undefined && +r.value !== regl[cle]){
+    if (!r) continue;
+    if (cle !== drag && regl[cle] !== undefined && +r.value !== regl[cle])
       r.value = regl[cle];
-      r.parentElement.querySelector("output").textContent = fmt(regl[cle]);
-    } else if (r) {
-      r.parentElement.querySelector("output").textContent = fmt(+r.value);
-    }
+    r.parentElement.querySelector("output").textContent = fmt(+r.value);
   }
+}
+
+// --- schema des zones : 0 -> accel+1 m, segments colores + position live ---
+function majZones(dist){
+  const z = $("zones");
+  const arret = val("Arret (cm)")/100, direct = val("Direct (cm)")/100,
+        accel = val("Accel (cm)")/100, portee = accel + 1.0;
+  const pc = m => Math.min(100, Math.max(0, 100*m/portee));
+  z.querySelectorAll(".seg,.lim,.lab,.limlab").forEach(e => e.remove());
+  const segs = [[0, arret, "var(--fige)", "FIGÉ"],
+                [arret, direct, "var(--ralenti)", "RALENTI"],
+                [direct, accel, "var(--accel)", "ACCÉLÉRATION"],
+                [accel, portee, "var(--phase)", "rattrapage"]];
+  for (const [a, b, c, nom] of segs){
+    const s = document.createElement("div");
+    s.className = "seg";
+    s.style.cssText = `left:${pc(a)}%;width:${pc(b)-pc(a)}%;background:${c};
+                       border-radius:8px;opacity:.85`;
+    z.appendChild(s);
+    const l = document.createElement("span");
+    l.className = "lab"; l.textContent = nom;
+    l.style.left = (pc(a)+pc(b))/2 + "%";
+    z.appendChild(l);
+  }
+  for (const m of [arret, direct, accel]){
+    const t = document.createElement("i");
+    t.className = "lim"; t.style.left = pc(m)+"%"; z.appendChild(t);
+    const tl = document.createElement("span");
+    tl.className = "limlab"; tl.textContent = m.toFixed(1).replace(".",",")+" m";
+    tl.style.left = pc(m)+"%"; z.appendChild(tl);
+  }
+  $("moi").style.left = dist == null ? "-30px" : pc(dist)+"%";
+  $("moi").style.display = dist == null ? "none" : "block";
 }
 
 function majEtat(s){
   $("etat").textContent = s.etat;
   $("etat").style.color = COULEURS[s.etat] || "var(--texte)";
-  $("vit").textContent  = "x" + s.v.toFixed(2);
+  const pc = Math.round(s.v * 100);
+  $("vitpc").textContent = pc + " %";
+  $("vitpc").style.color = COULEURS[s.etat] || "var(--texte)";
+  $("vitbar").style.width = Math.min(100, pc / 2) + "%";   // 200 % = barre pleine
+  $("vitbar").style.background = COULEURS[s.etat] || "var(--phase)";
   $("ret").textContent  = s.retard.toFixed(1) + " s";
   $("dist").textContent = s.distance ? s.distance.toFixed(2) + " m" : "—";
   $("fps").textContent  = s.fps_r.toFixed(0) + " / " + s.fps_c.toFixed(0);
   $("dev").textContent  = s.device + " — rendu / caméra (im/s)";
+  $("verapp").textContent = "v" + (s.version_app || "—");
   $("rife").textContent = s.rife;
   $("prof").textContent = s.profondeur;
   if (document.activeElement !== $("o_hud")) $("o_hud").value = s.options.hud;
@@ -194,7 +303,8 @@ function majEtat(s){
     p.appendChild(b);
   }
   if (!versions.length) p.innerHTML =
-    '<span class="note">aucune version sauvée</span>';
+    '<span class="note">aucune version sauvée pour l\'instant</span>';
+  majZones(s.distance);
 }
 
 $("o_interp").onchange = e => envoyer({t:"option", nom:"interpolation", v:e.target.checked});
@@ -224,9 +334,9 @@ document.addEventListener("keydown", e => {
 function connecter(){
   ws = new WebSocket("ws://localhost:8765");
   ws.onopen  = () => { $("dot").className = "ok";
-                       $("lien").textContent = "connecté à l'application"; };
-  ws.onclose = () => { $("dot").className = "";
-                       $("lien").textContent = "app fermée ? reconnexion…";
+                       $("lien").innerHTML = '<span id="dot" class="ok"></span>connecté'; };
+  ws.onclose = () => { $("lien").innerHTML =
+                       '<span id="dot"></span>app fermée ? reconnexion…';
                        setTimeout(connecter, 1000); };
   ws.onmessage = ev => {
     const s = JSON.parse(ev.data);

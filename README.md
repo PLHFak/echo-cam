@@ -91,8 +91,10 @@ défaut entre parenthèses. La touche **R** remet tout aux valeurs par défaut.
 |---|---|---|
 | **Arrêt (cm)** | 50 | Plus près que cette distance, l'image se fige. |
 | **Direct (cm)** | 200 | Plus loin, lecture en direct (ou rattrapage). Entre Arrêt et Direct : ralenti progressif. |
-| **Rattrapage x10** | 25 (= x2,5) | Vitesse de la lecture quand elle rattrape le direct en reculant. |
-| **Buffer (s)** | 12 | Mémoire d'images : c'est le retard maximum possible. 12 s en 720p ≈ 1 Go de RAM. |
+| **Vmax x10** | 20 (= 200 %) | Vitesse de rattrapage du direct en reculant. |
+| **Vmin (%)** | 10 | Plancher : la lecture ne descend jamais sous ce % (0 = l'image fige sous Arrêt). |
+| **Échelle dist (%)** | 100 | Correction de la distance IA — ou touche C à 2 m, réglage automatique. |
+| **Buffer (s)** | 30 | Mémoire d'images : c'est le retard maximum possible. 30 s en 720p ≈ 2,5 Go de RAM. |
 | **Immobilité (s)** | 10 | Durée sans bouger avant que la position devienne la nouvelle référence (touches 1..9, 0 en direct). |
 
 Les réglages plus fins (lissage, délai salle vide `ABSENT_TIMEOUT`, tolérance

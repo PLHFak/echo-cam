@@ -6,6 +6,19 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.12 — 29-09-2026 · Panneau web repensé, distance corrigée, nouveaux défauts
+- **Panneau web redessiné** : jauge de vitesse en %, schéma des zones de
+  distance avec la position de la personne en direct, bulles « ? » de
+  définition sur chaque réglage et option, thème sombre moderne.
+- **Vitesse en %** partout (HUD compris) ; le HUD « vitesse » affiche aussi
+  le retard.
+- **Échelle distance** : correction de la mesure IA (curseur, ou touche C
+  à 2 m qui la règle automatiquement) — corrige le « 2 m affichés = 1 m ».
+- **Vitesse plancher (Vmin)** : la lecture ne descend jamais sous ce %
+  (défaut 10 % — l'image ne fige plus complètement).
+- **Nouveaux défauts** : arrêt 50 cm · direct 2 m · accélération jusqu'à
+  4 m · vitesse max ×2 · plancher 10 % · buffer 30 s.
+
 ## v1.11 — 28-09-2026 · Spec V1 : panneau web, distance IA, reset (tag v1)
 - **Panneau de contrôle HTML** (`controle.html`, double-clic sur
   `panneau.bat`) relié à l'app par un pont WebSocket local : état en direct,
