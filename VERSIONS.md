@@ -6,6 +6,12 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.12.1 — 30-09-2026 · Correction distance préréglée, 2 colonnes, barre de retard
+- Correction de distance préréglée à **75 %** (mesure IA ~35 % trop longue) ;
+  toujours ajustable au curseur ou par la touche **C à 2 m**.
+- Panneau web : réglages sur **deux colonnes** ; **barre de retard** sous la
+  barre de vitesse (pleine = buffer plein).
+
 ## v1.12 — 29-09-2026 · Panneau web repensé, distance corrigée, nouveaux défauts
 - **Panneau web redessiné** : jauge de vitesse en %, schéma des zones de
   distance avec la position de la personne en direct, bulles « ? » de

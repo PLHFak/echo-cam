@@ -69,6 +69,8 @@
        background:#fff;border:3px solid var(--accent);transform:translateX(-50%);
        transition:left .2s;box-shadow:0 0 12px var(--accent)}
   /* ---- curseurs ---- */
+  #curseurs{display:grid;grid-template-columns:1fr 1fr;gap:0 34px}
+  @media (max-width:760px){#curseurs{grid-template-columns:1fr}}
   .curseur{display:grid;grid-template-columns:170px 1fr 66px;gap:12px;
            align-items:center;margin:10px 0}
   .curseur label{color:var(--sourd);font-size:13.5px;display:flex;align-items:center}
@@ -116,6 +118,9 @@
       <div class="jauge">
         <div class="barre"><i id="vitbar"></i></div>
         <small>vitesse de lecture (100 % = direct)</small>
+        <div class="barre" style="margin-top:8px"><i id="retbar"
+             style="background:var(--accent)"></i></div>
+        <small>retard accumulé (barre pleine = buffer plein)</small>
       </div>
       <span id="vitpc">—</span>
     </div>
@@ -135,7 +140,7 @@
     <div class="ligne" id="prof">—</div>
   </div>
 
-  <div class="carte">
+  <div class="carte large">
     <h2>Réglages</h2>
     <div id="curseurs"></div>
   </div>
@@ -192,7 +197,7 @@ const CURSEURS = [
   ["Vmin (%)", "Vitesse plancher", 0, 50, v=>v+" %",
    "La lecture ne descend jamais sous ce pourcentage tant que quelqu'un est présent. À 10 %, l'image ne fige jamais complètement ; à 0, elle fige sous Arrêt."],
   ["Echelle dist (%)", "Échelle distance", 25, 250, v=>v+" %",
-   "Correction de la distance mesurée par l'IA. Si l'écran affiche 2 m alors que vous êtes à 1 m, mettez 50 %. Ou placez-vous à 2 m et pressez C dans la fenêtre vidéo : la correction se règle toute seule."],
+   "Correction de la distance mesurée par l'IA, qui mesure ~35 % trop long (défaut : 75 %). Le plus simple : placez-vous à 2 m réels et pressez C dans la fenêtre vidéo, la correction se règle toute seule."],
   ["Buffer (s)", "Buffer (retard max)", 2, 60, v=>v+" s",
    "Mémoire d'images : c'est le retard maximum possible. 30 s en 720p ≈ 2,5 Go de RAM."],
   ["Lissage dist", "Lissage distance", 1, 30, v=>v,
@@ -281,6 +286,8 @@ function majEtat(s){
   $("vitpc").style.color = COULEURS[s.etat] || "var(--texte)";
   $("vitbar").style.width = Math.min(100, pc / 2) + "%";   // 200 % = barre pleine
   $("vitbar").style.background = COULEURS[s.etat] || "var(--phase)";
+  $("retbar").style.width =
+    Math.min(100, 100 * s.retard / Math.max(1, val("Buffer (s)"))) + "%";
   $("ret").textContent  = s.retard.toFixed(1) + " s";
   $("dist").textContent = s.distance ? s.distance.toFixed(2) + " m" : "—";
   $("fps").textContent  = s.fps_r.toFixed(0) + " / " + s.fps_c.toFixed(0);
