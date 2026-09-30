@@ -7,10 +7,14 @@ le serveur n'ecoute que sur 127.0.0.1.
 """
 
 import asyncio
+import http.server
 import json
+import os
 import threading
 
 PORT = 8765
+PORT_HTTP = 8766      # la page controle.html est servie par l'app elle-meme :
+                      # elle correspond donc toujours a la version qui tourne
 
 
 class Bridge:
@@ -26,7 +30,36 @@ class Bridge:
         self._clients = set()
         self._started = threading.Event()
         threading.Thread(target=self._run, daemon=True).start()
+        threading.Thread(target=self._run_http, daemon=True).start()
         self._started.wait(3.0)
+
+    # --- mini serveur HTTP : sert controle.html (version toujours a jour) ---
+    def _run_http(self):
+        dossier = os.path.dirname(os.path.abspath(__file__))
+
+        class Page(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                try:
+                    with open(os.path.join(dossier, "controle.html"), "rb") as f:
+                        corps = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(corps)))
+                    self.end_headers()
+                    self.wfile.write(corps)
+                except Exception:
+                    self.send_response(500)
+                    self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        try:
+            http.server.ThreadingHTTPServer(
+                ("127.0.0.1", PORT_HTTP), Page).serve_forever()
+        except Exception:
+            pass                        # port pris : la page file:// marche aussi
 
     def publish(self, state):
         with self._lock:
@@ -76,8 +109,8 @@ class Bridge:
         async def serve():
             async with websockets.serve(handler, "127.0.0.1", self.port):
                 self.ok = True
-                self.status = (f"Panneau web : ws://localhost:{self.port} "
-                               f"(double-clic sur controle.html)")
+                self.status = (f"Panneau web : http://localhost:{PORT_HTTP} "
+                               f"(double-clic sur panneau.bat)")
                 self._started.set()
                 await broadcaster()
 

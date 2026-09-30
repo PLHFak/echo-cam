@@ -46,7 +46,7 @@ from depth import DepthEstimator
 from bridge import Bridge
 from fond import Segmenter, Compositor
 
-ECHO_VERSION   = "1.13"
+ECHO_VERSION   = "1.13.1"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau, touche P)
@@ -583,6 +583,7 @@ def main():
         with st.lock:
             st.buffer.clear()
             st.stamps.clear()
+            st.masks.clear()
         delay, v_smooth, frozen = 0.0, 1.0, False
         prev_target = None
         rife_mode, rife_costs = "pleine", {"pleine": 0.0, "demi": 0.0}

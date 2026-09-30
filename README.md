@@ -75,8 +75,10 @@ Une variation de largeur d'épaules sous **±15 %** compte comme immobile
 ## Panneau de contrôle web
 
 L'application ouverte, double-cliquez sur **panneau.bat** : la page de
-contrôle s'ouvre dans le navigateur (état en direct, curseurs, options,
-versions de réglages). Tout s'applique immédiatement, sans redémarrer.
+contrôle s'ouvre dans le navigateur à l'adresse http://localhost:8766 —
+elle est servie par l'application elle-même, donc toujours à sa version.
+Tout s'applique immédiatement, sans redémarrer. Si la page ne s'ouvre pas :
+lancez d'abord l'application (lancer.bat).
 
 ## Mettre à jour
 
