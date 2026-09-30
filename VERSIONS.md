@@ -6,6 +6,14 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.13 — 30-09-2026 · Galerie étape 1 : détourage + fond virtuel (touche V)
+- La personne est découpée en temps réel (MediaPipe Selfie Segmentation,
+  masque par image caméra stocké dans le buffer) et incrustée sur un fond :
+  fond de test « galerie » généré, ou votre `fond.jpg` posé dans le dossier.
+- Touche **V** + interrupteur « Fond virtuel » du panneau web.
+- Plan complet de la galerie Unity (boucle infinie, visiteurs stop-and-go
+  latéraux, temps asservi) : `docs/galerie-unity-plan.md`.
+
 ## v1.12.1 — 30-09-2026 · Correction distance préréglée, 2 colonnes, barre de retard
 - Correction de distance préréglée à **75 %** (mesure IA ~35 % trop longue) ;
   toujours ajustable au curseur ou par la touche **C à 2 m**.

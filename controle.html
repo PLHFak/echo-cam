@@ -156,8 +156,9 @@
     <div class="opt"><span>Distance par profondeur IA
       <i class="aide" data-t="Mesure la distance avec une carte de profondeur calculée par IA (stable même quand on pivote). Décoché : ancienne méthode par largeur d'épaules (secours, demande une calibration).">?</i></span>
       <label class="inter"><input type="checkbox" id="o_ia"><i></i></label></div>
-    <div class="opt"><span>Fond virtuel <small style="color:var(--sourd)">&nbsp;(V2, à venir)</small></span>
-      <label class="inter"><input type="checkbox" disabled><i></i></label></div>
+    <div class="opt"><span>Fond virtuel
+      <i class="aide" data-t="La personne est découpée en temps réel et incrustée sur un fond (pour l'instant : fond de test « galerie », ou votre image fond.jpg dans le dossier). Étapes suivantes : la galerie animée Unity. Touche V dans la fenêtre vidéo.">?</i></span>
+      <label class="inter"><input type="checkbox" id="o_fond"><i></i></label></div>
     <div class="opt"><span>Monitoring à l'écran (HUD)
       <i class="aide" data-t="Ce qui est incrusté sur l'image vidéo : « complet » = état, vitesse %, retard, distance… ; « vitesse » = vitesse % et retard seulement ; « aucun » = image pure.">?</i></span>
       <select id="o_hud"><option>complet</option><option>vitesse</option>
@@ -300,6 +301,8 @@ function majEtat(s){
   $("o_reset").checked  = s.options.reset;
   $("o_ia").checked     = s.options.profondeur_ia;
   $("o_ia").disabled    = !s.profondeur_dispo;
+  $("o_fond").checked   = !!s.options.fond;
+  $("o_fond").disabled  = !s.fond_dispo;
   versions = s.versions.liste; active = s.versions.active;
   const p = $("puces"); p.innerHTML = "";
   for (const n of versions){
@@ -317,6 +320,7 @@ function majEtat(s){
 $("o_interp").onchange = e => envoyer({t:"option", nom:"interpolation", v:e.target.checked});
 $("o_reset").onchange  = e => envoyer({t:"option", nom:"reset",         v:e.target.checked});
 $("o_ia").onchange     = e => envoyer({t:"option", nom:"profondeur",    v:e.target.checked});
+$("o_fond").onchange   = e => envoyer({t:"option", nom:"fond",          v:e.target.checked});
 $("o_hud").onchange    = e => envoyer({t:"option", nom:"hud",           v:e.target.value});
 $("b_defauts").onclick = () => envoyer({t:"defauts"});
 $("b_sauver").onclick  = () => { const n = $("v_nom").value.trim();
