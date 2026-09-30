@@ -39,6 +39,7 @@ cette position devient la nouvelle référence.
 |---|---|
 | **C** | Calibration manuelle : la position courante devient la référence (2 m) |
 | **I** | Interpolation RIFE : couper / rétablir |
+| **V** | Fond virtuel : personne incrustée sur le fond (test ou fond.jpg) |
 | **H** | Mode du HUD incrusté : complet → vitesse seule → aucun |
 | **S** | Sauvegarder la version courante (taper un nom, **Entrée**) |
 | **←/→** | Version précédente / suivante (reset propre du run) |
@@ -138,4 +139,5 @@ la lecture vit avec une micro-latence fixe d'environ 50 ms, imperceptible.
 
 ## Prochaine étape
 
-Fond virtuel (touche V) ; pour la 4K accélérée, TensorRT.
+Galerie animée Unity autour de la personne (plan : `docs/galerie-unity-plan.md`) ;
+pour la 4K accélérée, TensorRT.

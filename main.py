@@ -44,8 +44,9 @@ import mediapipe as mp
 from rife_interp import RifeInterpolator
 from depth import DepthEstimator
 from bridge import Bridge
+from fond import Segmenter, Compositor
 
-ECHO_VERSION   = "1.12.1"
+ECHO_VERSION   = "1.13"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau, touche P)
@@ -337,6 +338,7 @@ class Shared:
         self.lock       = threading.Lock()
         self.buffer     = deque(maxlen=max_frames)   # images brutes (BGR)
         self.stamps     = deque(maxlen=max_frames)   # heure de capture
+        self.masks      = deque(maxlen=max_frames)   # masques personne (ou None)
         self.running    = True
         self.distance   = None      # derniere distance estimee (m)
         self.ref_width  = None      # largeur d'epaules de reference
@@ -363,7 +365,7 @@ def torso_center(landmarks):
             float(np.mean([p.y for p in pts])))
 
 
-def capture_thread(cap, pose, st, depth):
+def capture_thread(cap, pose, st, depth, seg):
     """Capture + detection de posture + estimation de distance, a la cadence
     de la camera. L'affichage tourne dans la boucle principale, a part."""
     widths       = deque(maxlen=30)     # fenetre de lissage max (curseur)
@@ -398,12 +400,24 @@ def capture_thread(cap, pose, st, depth):
             debug_log("camera", f"{perdues} image(s) manquante(s), trou de "
                                 f"{dt * 1000:.0f} ms (total {st.cam_drops})")
 
+        # --- masque personne/fond (pour l'incrustation, touche V) ---
+        m = None
+        if seg is not None and seg.ok:
+            try:
+                m = seg.mask(frame)
+            except Exception as e:
+                seg.ok = False
+                seg.status = f"Detourage : erreur ({type(e).__name__})"
+                debug_log("fond", f"erreur de segmentation, detourage coupe : {e}")
+
         with st.lock:
             if st.want_max_frames != st.buffer.maxlen:
                 st.buffer = deque(st.buffer, maxlen=st.want_max_frames)
                 st.stamps = deque(st.stamps, maxlen=st.want_max_frames)
+                st.masks  = deque(st.masks,  maxlen=st.want_max_frames)
             st.buffer.append(frame)
             st.stamps.append(now)
+            st.masks.append(m)
         st.fps_cam = fps_meas
 
         # --- calibration manuelle (touche C, demandee par l'affichage) ---
@@ -495,6 +509,11 @@ def main():
     # pont local pour l'interface HTML (spec V1 §1)
     bridge = Bridge()
     print(f"[ECHO] {bridge.status}")
+
+    # detourage + fond virtuel (galerie, etape 1 ; touche V)
+    seg = Segmenter()
+    comp = Compositor(CAP_WIDTH, CAP_HEIGHT) if seg.ok else None
+    print(f"[ECHO] {seg.status}" + (f" (fond : {comp.source})" if comp else ""))
     debug_log("config", f"ECHO v{ECHO_VERSION} | {cuda_txt} | {rife.status} | "
                         f"rendu vise {RENDER_FPS} im/s (budget "
                         f"{1000.0 / RENDER_FPS:.1f} ms) | camera demandee "
@@ -515,8 +534,8 @@ def main():
 
     st = Shared(int(BUFFER_SECONDS * FPS))
     st.depth_mode = "ia" if depth.ok else "epaules"
-    worker = threading.Thread(target=capture_thread, args=(cap, pose, st, depth),
-                              daemon=True)
+    worker = threading.Thread(target=capture_thread,
+                              args=(cap, pose, st, depth, seg), daemon=True)
     worker.start()
 
     delay       = 0.0       # retard courant (s) par rapport au direct
@@ -524,6 +543,7 @@ def main():
     frozen      = False     # etat FIGE avec hysteresis
     stable_keys = None      # duree fixee par les touches 1..0 (prioritaire)
     rife_on     = True      # touche I
+    fond_on     = False     # touche V : incrustation sur fond virtuel
     reset_on    = True      # touche T : rattrapage du direct autorise (spec §3)
     hud_mode    = 0         # index dans HUD_MODES (touche H)
     naming      = None      # texte en cours de frappe (touche S), sinon None
@@ -613,6 +633,8 @@ def main():
                         reset_on = bool(v_o)
                     elif nom_o == "profondeur" and depth.ok:
                         st.depth_mode = "ia" if v_o else "epaules"
+                    elif nom_o == "fond" and comp is not None:
+                        fond_on = bool(v_o)
                     elif nom_o == "hud" and v_o in HUD_MODES:
                         hud_mode = HUD_MODES.index(v_o)
                 elif t == "defauts":
@@ -693,10 +715,13 @@ def main():
             idx = bisect_left(st.stamps, target)
             idx = min(idx, len(st.stamps) - 1)
             img_next, t_next = st.buffer[idx], st.stamps[idx]
+            m_next = st.masks[idx]
             if idx > 0:
                 img_prev, t_prev = st.buffer[idx - 1], st.stamps[idx - 1]
+                m_prev = st.masks[idx - 1]
             else:
                 img_prev, t_prev = img_next, t_next
+                m_prev = m_next
 
         t_logic = time.monotonic()
 
@@ -744,6 +769,15 @@ def main():
                                   f"interpolation coupee : {e}")
         if not used_rife:
             out = img_prev if frac < 0.5 else img_next
+
+        # --- incrustation sur fond virtuel (touche V) ---
+        if fond_on and comp is not None:
+            if m_prev is not None and m_next is not None:
+                m_mix = m_prev * (1.0 - frac) + m_next * frac
+            else:
+                m_mix = m_next if m_next is not None else m_prev
+            if m_mix is not None:
+                out = comp.apply(out, m_mix)
         out = cv2.flip(out, 1)                  # effet miroir horizontal
         t_image = time.monotonic()
 
@@ -806,7 +840,9 @@ def main():
                  st.cam_drops + late + jumps == 0),
                 (f"Reset position : {'ON' if reset_on else 'OFF (retard garde)'}",
                  reset_on),
-                ("Touches : C D I T H S P R fleches Q", True),
+                (f"Fond virtuel : {'ON' if fond_on else 'OFF'} (touche V)",
+                 fond_on),
+                ("Touches : C D I T V H S P R fleches Q", True),
             ])
         # --- etat pour le panneau web (~10 Hz) ---
         if n_frame % 6 == 0:
@@ -822,7 +858,8 @@ def main():
                 "reglages": dict(saved_positions),
                 "options": {"interpolation": rife_on, "reset": reset_on,
                             "profondeur_ia": st.depth_mode == "ia",
-                            "hud": HUD_MODES[hud_mode]},
+                            "fond": fond_on, "hud": HUD_MODES[hud_mode]},
+                "fond_dispo": comp is not None,
                 "versions": {"liste": sorted(presets), "active": active_preset},
                 "version_app": ECHO_VERSION,
             })
@@ -895,6 +932,8 @@ def main():
             st.depth_mode = "epaules" if st.depth_mode == "ia" else "ia"
         if key in (ord('t'), ord('T')):                # reset de position on/off
             reset_on = not reset_on
+        if key in (ord('v'), ord('V')) and comp is not None:   # fond virtuel
+            fond_on = not fond_on
         if key in (ord('h'), ord('H')):         # mode HUD
             hud_mode = (hud_mode + 1) % len(HUD_MODES)
         if key in (ord('s'), ord('S')):         # sauver une version nommee
