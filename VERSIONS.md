@@ -6,6 +6,16 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.13.1 — 30-09-2026 · Panneau compact 3 colonnes, page servie par l'app
+- Panneau web compact : réglages sur **3 colonnes**, options en largeur,
+  tout tient à l'écran. Version de l'app affichée dans l'en-tête.
+- La page est désormais **servie par l'application** (http://localhost:8766,
+  `panneau.bat` mis à jour) : plus jamais de page périmée ouverte d'un
+  ancien dossier — cause probable du « ne se connecte pas ».
+- Page blindée : une donnée inattendue ne vide plus l'affichage.
+- Bug corrigé : au chargement d'une version, les masques de découpe
+  n'étaient pas vidés avec le buffer (incrustation désynchronisée).
+
 ## v1.13 — 30-09-2026 · Galerie étape 1 : détourage + fond virtuel (touche V)
 - La personne est découpée en temps réel (MediaPipe Selfie Segmentation,
   masque par image caméra stocké dans le buffer) et incrustée sur un fond :

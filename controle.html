@@ -21,14 +21,13 @@
   #dot{display:inline-block;width:9px;height:9px;border-radius:50%;
        background:var(--fige);margin-right:6px;vertical-align:1px}
   #dot.ok{background:var(--phase)}
-  .grille{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
-          max-width:1200px;margin:0 auto}
+  .grille{display:grid;gap:12px;grid-template-columns:1fr;max-width:1400px;margin:0 auto}
   .carte{background:linear-gradient(180deg,#1a2130,var(--carte));
-         border:1px solid var(--bord);border-radius:16px;padding:18px 20px;
+         border:1px solid var(--bord);border-radius:14px;padding:12px 16px;
          box-shadow:0 8px 24px #0006}
   .carte.large{grid-column:1/-1}
-  .carte h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;
-            color:var(--sourd);margin:0 0 14px}
+  .carte h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+            color:var(--sourd);margin:0 0 8px}
   /* ---- bulles d'aide ---- */
   .aide{display:inline-flex;align-items:center;justify-content:center;
         width:17px;height:17px;border-radius:50%;background:#2c3648;
@@ -41,19 +40,19 @@
         box-shadow:0 10px 30px #000a;white-space:normal}
   /* ---- etat en direct ---- */
   .etatligne{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
-  #etat{font-size:26px;font-weight:800;padding:8px 18px;border-radius:12px;
+  #etat{font-size:22px;font-weight:800;padding:8px 18px;border-radius:12px;
         background:#0007;letter-spacing:.03em}
   .jauge{flex:1;min-width:220px}
   .jauge .barre{height:14px;background:#0008;border-radius:7px;overflow:hidden}
   .jauge .barre i{display:block;height:100%;width:0%;background:var(--phase);
                   border-radius:7px;transition:width .15s,background .3s}
   .jauge small{color:var(--sourd)}
-  #vitpc{font-size:34px;font-weight:800;min-width:110px;text-align:right;
+  #vitpc{font-size:28px;font-weight:800;min-width:110px;text-align:right;
          font-variant-numeric:tabular-nums}
   .tuiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
           gap:10px;margin-top:14px}
   .tuile{background:#0006;border-radius:12px;padding:10px 14px}
-  .tuile b{font-size:21px;font-weight:650;display:block;font-variant-numeric:tabular-nums}
+  .tuile b{font-size:18px;font-weight:650;display:block;font-variant-numeric:tabular-nums}
   .tuile span{color:var(--sourd);font-size:12px;display:flex;align-items:center}
   .ligne{color:var(--sourd);font-size:13px;margin-top:10px}
   /* ---- schema des zones ---- */
@@ -69,15 +68,17 @@
        background:#fff;border:3px solid var(--accent);transform:translateX(-50%);
        transition:left .2s;box-shadow:0 0 12px var(--accent)}
   /* ---- curseurs ---- */
-  #curseurs{display:grid;grid-template-columns:1fr 1fr;gap:0 34px}
+  #curseurs{display:grid;grid-template-columns:repeat(3,1fr);gap:0 26px}
+  @media (max-width:1100px){#curseurs{grid-template-columns:1fr 1fr}}
   @media (max-width:760px){#curseurs{grid-template-columns:1fr}}
-  .curseur{display:grid;grid-template-columns:170px 1fr 66px;gap:12px;
-           align-items:center;margin:10px 0}
-  .curseur label{color:var(--sourd);font-size:13.5px;display:flex;align-items:center}
+  .curseur{display:grid;grid-template-columns:128px 1fr 58px;gap:8px;
+           align-items:center;margin:5px 0}
+  .curseur label{color:var(--sourd);font-size:12.5px;display:flex;align-items:center}
   .curseur output{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
   input[type=range]{width:100%;accent-color:var(--accent);height:22px}
   /* ---- options ---- */
-  .opt{display:flex;justify-content:space-between;align-items:center;margin:11px 0}
+  #opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:2px 30px}
+  .opt{display:flex;justify-content:space-between;align-items:center;margin:6px 0}
   .opt>span{display:flex;align-items:center}
   .inter{position:relative;width:46px;height:24px;flex:none}
   .inter input{opacity:0;width:0;height:0}
@@ -108,6 +109,7 @@
 <header>
   <h1><b>ECHO</b> — panneau de contrôle</h1>
   <span id="lien"><span id="dot"></span>connexion…</span>
+  <span id="verh" style="color:var(--sourd);font-size:12px"></span>
 </header>
 <div class="grille">
 
@@ -140,13 +142,14 @@
     <div class="ligne" id="prof">—</div>
   </div>
 
-  <div class="carte large">
+  <div class="carte">
     <h2>Réglages</h2>
     <div id="curseurs"></div>
   </div>
 
   <div class="carte">
     <h2>Options</h2>
+    <div id="opts">
     <div class="opt"><span>Interpolation RIFE
       <i class="aide" data-t="Le GPU fabrique les images intermédiaires : ralenti parfaitement fluide et écran alimenté à 60 im/s. À couper uniquement pour comparer.">?</i></span>
       <label class="inter"><input type="checkbox" id="o_interp"><i></i></label></div>
@@ -163,7 +166,8 @@
       <i class="aide" data-t="Ce qui est incrusté sur l'image vidéo : « complet » = état, vitesse %, retard, distance… ; « vitesse » = vitesse % et retard seulement ; « aucun » = image pure.">?</i></span>
       <select id="o_hud"><option>complet</option><option>vitesse</option>
       <option>aucun</option></select></div>
-    <div class="rang" style="margin-top:14px">
+    </div>
+    <div class="rang" style="margin-top:8px">
       <button id="b_defauts">Valeurs par défaut</button>
       <i class="aide" data-t="Revient à la configuration de référence : arrêt 50 cm, direct 2 m, accélération jusqu'à 4 m, vitesse max ×2, plancher 10 %, buffer 30 s.">?</i>
     </div>
@@ -347,12 +351,17 @@ function connecter(){
   ws.onopen  = () => { $("dot").className = "ok";
                        $("lien").innerHTML = '<span id="dot" class="ok"></span>connecté'; };
   ws.onclose = () => { $("lien").innerHTML =
-                       '<span id="dot"></span>app fermée ? reconnexion…';
+                       '<span id="dot"></span>app fermée ? (lancer.bat d\'abord) reconnexion…';
                        setTimeout(connecter, 1000); };
   ws.onmessage = ev => {
-    const s = JSON.parse(ev.data);
-    majEtat(s);
-    majCurseurs(s.reglages);
+    try {
+      const s = JSON.parse(ev.data);
+      $("verh").textContent = "app v" + (s.version_app || "?");
+      majEtat(s);
+      majCurseurs(s.reglages || {});
+    } catch (e) {                 // une donnee inattendue ne vide pas la page
+      console.error("etat ignore :", e);
+    }
   };
 }
 connecter();
