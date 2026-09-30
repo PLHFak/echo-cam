@@ -45,7 +45,7 @@ from rife_interp import RifeInterpolator
 from depth import DepthEstimator
 from bridge import Bridge
 
-ECHO_VERSION   = "1.12"
+ECHO_VERSION   = "1.12.1"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau, touche P)
@@ -66,7 +66,9 @@ DIST_ACCEL     = 4.0      # m — rattrapage plein (v = Vmax)
 VMAX           = 2.0      # vitesse max de rattrapage
 VMIN           = 0.10     # plancher de vitesse quand quelqu'un est present :
                           # a 10 %, l'image ne fige jamais completement (0 = fige)
-DIST_SCALE     = 1.0      # correction d'echelle de la distance IA (touche C a 2 m)
+DIST_SCALE     = 0.75     # correction d'echelle de la distance IA : mesuree
+                          # ~35 % trop longue sur la config PLH (touche C a 2 m
+                          # pour recaler automatiquement)
 BUFFER_SECONDS = 30       # profondeur memoire = retard maxi (30 s * 720p ~ 2.5 Go RAM)
 SMOOTH_WINDOW  = 8        # lissage de la distance (nb de mesures)
 SMOOTH_SPEED   = 0.15     # lissage de la vitesse (0 = fige, 1 = instantane)
@@ -184,7 +186,7 @@ PANEL_DEFAULTS = {
     "Accel (cm)":       (int(DIST_ACCEL * 100),  600),
     "Vmax x10":         (int(VMAX * 10),         60),
     "Vmin (%)":         (int(VMIN * 100),        50),
-    "Echelle dist (%)": (int(DIST_SCALE * 100),  250),
+    "Echelle dist (%)": (int(DIST_SCALE * 100),  250),   # defaut 75 : mesure IA ~35 % trop longue
     "Buffer (s)":       (BUFFER_SECONDS,         60),
     "Lissage dist":     (SMOOTH_WINDOW,          30),
     "Lissage vit x100": (int(SMOOTH_SPEED * 100), 100),
@@ -199,7 +201,7 @@ PANEL_HELP = [
     "Accel (300) : v monte de 1 a Vmax entre Direct et Accel",
     "Vmax (x2) : vitesse de rattrapage plein",
     "Vmin (10%) : plancher - l'image ne fige jamais sous ce %",
-    "Echelle dist (100%) : correction de la distance IA (C a 2 m)",
+    "Echelle dist (75%) : correction de la distance IA (C a 2 m)",
     "Buffer (30 s) : memoire d'images = retard maxi",
     "Lissage dist (8) / vit (0.15) : transitions douces",
     "Hysteresis (10 cm) : anti-oscillation au seuil FIGE",
