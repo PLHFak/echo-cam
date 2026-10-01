@@ -86,12 +86,25 @@ function Diagnostic-Hub {
 Etape "1/6 Unity Hub"
 $hub = Trouve-Hub
 if (-not $hub) {
-    Write-Host "Installation de Unity Hub (winget)..."
-    winget install --id Unity.UnityHub -e --silent `
-        --accept-package-agreements --accept-source-agreements
-    for ($i = 0; $i -lt 30 -and -not (Trouve-Hub); $i++) { Start-Sleep 2 }
+    # winget laisse parfois une installation fantome (fichiers bloques par
+    # l'antivirus) : telechargement direct chez Unity + installeur VISIBLE,
+    # pour que toute demande (Windows, antivirus) apparaisse a l'ecran.
+    Write-Host "Telechargement de l'installeur Unity Hub (unity.com)..."
+    $setup = Join-Path $Env:TEMP "UnityHubSetup.exe"
+    Invoke-WebRequest "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.exe" `
+                      -OutFile $setup
+    Write-Host ""
+    Write-Host ">>> L'installeur Unity Hub va s'ouvrir : cliquez Install / Suivant." `
+               -ForegroundColor Yellow
+    Write-Host ">>> Si l'antivirus (AVG) affiche une alerte : AUTORISER." `
+               -ForegroundColor Yellow
+    Start-Process $setup -Wait
+    for ($i = 0; $i -lt 15 -and -not (Trouve-Hub); $i++) { Start-Sleep 2 }
     $hub = Trouve-Hub
     if (-not $hub) { Diagnostic-Hub; throw "Unity Hub introuvable apres installation." }
+    # le Hub se lance souvent tout seul en fin d'installation : on le ferme
+    Start-Sleep 3
+    Get-Process "Unity Hub" -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 Write-Host "Unity Hub : $hub"
 
