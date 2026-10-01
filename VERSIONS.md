@@ -6,6 +6,10 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.13.2 — 01-10-2026 · Panneau resserré : Réglages et Options côte à côte
+- Réglages (2 colonnes) et Options sur la même rangée, vertical resserré :
+  tout le panneau tient sur un écran 1080p sans défiler.
+
 ## v1.13.1 — 30-09-2026 · Panneau compact 3 colonnes, page servie par l'app
 - Panneau web compact : réglages sur **3 colonnes**, options en largeur,
   tout tient à l'écran. Version de l'app affichée dans l'en-tête.

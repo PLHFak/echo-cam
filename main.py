@@ -46,7 +46,7 @@ from depth import DepthEstimator
 from bridge import Bridge
 from fond import Segmenter, Compositor
 
-ECHO_VERSION   = "1.13.1"
+ECHO_VERSION   = "1.13.2"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau, touche P)
