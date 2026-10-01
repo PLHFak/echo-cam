@@ -10,9 +10,34 @@ $projet = Join-Path $HOME "Documents\echo-galerie"
 function Etape($t) { Write-Host ""; Write-Host "=== $t ===" -ForegroundColor Cyan }
 
 function Trouve-Hub {
+    # 1) chemins habituels (installation machine ou par utilisateur)
     foreach ($p in @("$Env:ProgramFiles\Unity Hub\Unity Hub.exe",
-                     "$Env:LOCALAPPDATA\Programs\Unity Hub\Unity Hub.exe")) {
-        if (Test-Path $p) { return $p }
+                     "${Env:ProgramFiles(x86)}\Unity Hub\Unity Hub.exe",
+                     "$Env:LOCALAPPDATA\Programs\Unity Hub\Unity Hub.exe",
+                     "$Env:LOCALAPPDATA\Programs\unityhub\Unity Hub.exe")) {
+        if ($p -and (Test-Path $p)) { return $p }
+    }
+    # 2) registre Windows (ou qu'ait choisi l'installeur)
+    foreach ($r in @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                     "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*")) {
+        $e = Get-ItemProperty $r -ErrorAction SilentlyContinue |
+             Where-Object { $_.DisplayName -like "Unity Hub*" } | Select-Object -First 1
+        if ($e -and $e.InstallLocation) {
+            $p = Join-Path $e.InstallLocation "Unity Hub.exe"
+            if (Test-Path $p) { return $p }
+        }
+        if ($e -and $e.DisplayIcon) {
+            $p = ($e.DisplayIcon -split ",")[0].Trim('"')
+            if ($p -like "*Unity Hub.exe" -and (Test-Path $p)) { return $p }
+        }
+    }
+    # 3) balayage des dossiers d'installation (dernier recours)
+    foreach ($racine in @($Env:ProgramFiles, "$Env:LOCALAPPDATA\Programs")) {
+        if (-not $racine -or -not (Test-Path $racine)) { continue }
+        $p = Get-ChildItem $racine -Filter "Unity Hub.exe" -Recurse -Depth 3 `
+             -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($p) { return $p.FullName }
     }
     return $null
 }
