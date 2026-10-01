@@ -7,6 +7,7 @@
 
 using System;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 public static class GalerieBuilder
@@ -20,6 +21,9 @@ public static class GalerieBuilder
     [MenuItem("ECHO/Construire la galerie")]
     public static void Construire()
     {
+        if (Application.isBatchMode)             // installeur : scene neuve
+            EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects,
+                                        NewSceneMode.Single);
         var ancien = GameObject.Find("GALERIE");
         if (ancien != null) UnityEngine.Object.DestroyImmediate(ancien);
         var racine = new GameObject("GALERIE");
@@ -136,7 +140,9 @@ public static class GalerieBuilder
         echo.AddComponent<EchoLink>();
 
         Selection.activeGameObject = racine;
-        Debug.Log("[ECHO] Galerie construite : Play pour la faire vivre.");
+        EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene(),
+                                     "Assets/ECHO/Galerie.unity");
+        Debug.Log("[ECHO] Galerie construite et sauvee : Play pour la faire vivre.");
     }
 
     static Material Mat(Color c)

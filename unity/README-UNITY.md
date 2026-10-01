@@ -1,5 +1,18 @@
 # ECHO — La galerie Unity, pas à pas
 
+## Le plus simple : l'installeur automatique
+
+Dans `Documents\echo-cam`, double-cliquez sur **installer_unity.bat** :
+il installe Unity Hub, l'éditeur Unity 2022.3 LTS (~7 Go, 20 à 40 min),
+crée le projet **echo-galerie**, copie les fichiers ECHO, installe
+l'émetteur Spout, **construit la scène**, puis ouvre Unity — il ne reste
+qu'à appuyer sur **Play**. Côté ECHO : `lancer.bat` + touche **V**.
+
+En cas d'échec de l'installeur, la méthode manuelle ci-dessous fait la
+même chose pas à pas.
+
+---
+
 Objectif : la galerie en 3D tourne dans Unity, envoie son image à ECHO par
 Spout (elle devient le fond de l'incrustation) et cale son horloge sur votre
 vitesse (ralenti/figé ensemble). Montage : **un seul clic de menu** construit
