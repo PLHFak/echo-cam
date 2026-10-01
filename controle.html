@@ -21,7 +21,8 @@
   #dot{display:inline-block;width:9px;height:9px;border-radius:50%;
        background:var(--fige);margin-right:6px;vertical-align:1px}
   #dot.ok{background:var(--phase)}
-  .grille{display:grid;gap:12px;grid-template-columns:1fr;max-width:1400px;margin:0 auto}
+  .grille{display:grid;gap:10px;grid-template-columns:2fr 1fr;max-width:1400px;margin:0 auto}
+  @media (max-width:1000px){.grille{grid-template-columns:1fr}}
   .carte{background:linear-gradient(180deg,#1a2130,var(--carte));
          border:1px solid var(--bord);border-radius:14px;padding:12px 16px;
          box-shadow:0 8px 24px #0006}
@@ -49,14 +50,14 @@
   .jauge small{color:var(--sourd)}
   #vitpc{font-size:28px;font-weight:800;min-width:110px;text-align:right;
          font-variant-numeric:tabular-nums}
-  .tuiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
-          gap:10px;margin-top:14px}
-  .tuile{background:#0006;border-radius:12px;padding:10px 14px}
+  .tuiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+          gap:8px;margin-top:8px}
+  .tuile{background:#0006;border-radius:10px;padding:6px 12px}
   .tuile b{font-size:18px;font-weight:650;display:block;font-variant-numeric:tabular-nums}
   .tuile span{color:var(--sourd);font-size:12px;display:flex;align-items:center}
   .ligne{color:var(--sourd);font-size:13px;margin-top:10px}
   /* ---- schema des zones ---- */
-  .zones{position:relative;height:64px;margin:26px 6px 4px}
+  .zones{position:relative;height:58px;margin:20px 6px 0}
   .zones .seg{position:absolute;top:22px;height:16px}
   .zones .lab{position:absolute;top:44px;font-size:11.5px;color:var(--sourd);
               transform:translateX(-50%);white-space:nowrap}
@@ -68,17 +69,16 @@
        background:#fff;border:3px solid var(--accent);transform:translateX(-50%);
        transition:left .2s;box-shadow:0 0 12px var(--accent)}
   /* ---- curseurs ---- */
-  #curseurs{display:grid;grid-template-columns:repeat(3,1fr);gap:0 26px}
-  @media (max-width:1100px){#curseurs{grid-template-columns:1fr 1fr}}
+  #curseurs{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
   @media (max-width:760px){#curseurs{grid-template-columns:1fr}}
-  .curseur{display:grid;grid-template-columns:128px 1fr 58px;gap:8px;
-           align-items:center;margin:5px 0}
+  .curseur{display:grid;grid-template-columns:118px 1fr 54px;gap:7px;
+           align-items:center;margin:3px 0}
   .curseur label{color:var(--sourd);font-size:12.5px;display:flex;align-items:center}
   .curseur output{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
   input[type=range]{width:100%;accent-color:var(--accent);height:22px}
   /* ---- options ---- */
-  #opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:2px 30px}
-  .opt{display:flex;justify-content:space-between;align-items:center;margin:6px 0}
+  #opts{display:grid;grid-template-columns:1fr;gap:0}
+  .opt{display:flex;justify-content:space-between;align-items:center;margin:4px 0;font-size:13.5px}
   .opt>span{display:flex;align-items:center}
   .inter{position:relative;width:46px;height:24px;flex:none}
   .inter input{opacity:0;width:0;height:0}
@@ -142,7 +142,7 @@
     <div class="ligne" id="prof">—</div>
   </div>
 
-  <div class="carte">
+  <div class="carte" id="c_reglages">
     <h2>Réglages</h2>
     <div id="curseurs"></div>
   </div>
