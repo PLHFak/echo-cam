@@ -6,6 +6,18 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.15 — 01-10-2026 · Projet Unity : la galerie (étapes 3-5 du plan)
+- Dossier `unity/` : scripts + guide `README-UNITY.md`. **Un clic de menu**
+  (ECHO → Construire la galerie) fabrique toute la scène : couloir de
+  3 modules de 12 m, œuvres encadrées, statues sur socles, lumières,
+  caméra fixe au centre + émetteur Spout (KlakSpout).
+- **Visiteurs** : rails latéraux uniquement (le centre reste vide), sens
+  unique vers l'avant, cycle marche/contemplation aléatoire, boucle de
+  36 m sans couture (galerie infinie), pas de dépassement.
+- **Horloge asservie** (`EchoLink.cs`) : Unity lit la vitesse sur le pont
+  WebSocket d'ECHO et règle `Time.timeScale` — la galerie ralentit et se
+  fige avec la personne ; au réel si ECHO est fermé.
+
 ## v1.14 — 01-10-2026 · Ancien panneau supprimé, distance recalée, fond Spout (étape 2)
 - **Ancienne fenêtre de réglages OpenCV supprimée** : le panneau web fait tout
   (la touche P disparaît).

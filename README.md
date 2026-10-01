@@ -147,7 +147,9 @@ la lecture vit avec une micro-latence fixe d'environ 50 ms, imperceptible.
   elle est coupée automatiquement (et retentée périodiquement) — la
   cadence prime.
 
-## Prochaine étape
+## La galerie Unity
 
-Galerie animée Unity autour de la personne (plan : `docs/galerie-unity-plan.md`) ;
-pour la 4K accélérée, TensorRT.
+Le projet complet (scripts + guide pas à pas) est dans le dossier `unity/` :
+voir **unity/README-UNITY.md**. Un clic de menu construit la scène ; la
+galerie envoie son image à ECHO par Spout et cale son horloge sur votre
+vitesse. Pour la 4K accélérée : TensorRT, plus tard.
