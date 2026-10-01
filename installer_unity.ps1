@@ -32,14 +32,54 @@ function Trouve-Hub {
             if ($p -like "*Unity Hub.exe" -and (Test-Path $p)) { return $p }
         }
     }
-    # 3) balayage des dossiers d'installation (dernier recours)
-    foreach ($racine in @($Env:ProgramFiles, "$Env:LOCALAPPDATA\Programs")) {
+    # 3) raccourcis du menu Demarrer (l'installeur en cree toujours un)
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($menu in @("$Env:ProgramData\Microsoft\Windows\Start Menu",
+                        "$Env:APPDATA\Microsoft\Windows\Start Menu")) {
+        $lnk = Get-ChildItem $menu -Filter "Unity Hub*.lnk" -Recurse `
+               -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($lnk) {
+            $cible = $shell.CreateShortcut($lnk.FullName).TargetPath
+            if ($cible -and (Test-Path $cible)) { return $cible }
+        }
+    }
+    # 4) registre App Paths
+    foreach ($r in @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Unity Hub.exe",
+                     "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Unity Hub.exe")) {
+        $e = Get-ItemProperty $r -ErrorAction SilentlyContinue
+        if ($e -and $e.'(default)' -and (Test-Path $e.'(default)')) { return $e.'(default)' }
+    }
+    # 5) balayage des dossiers d'installation (tous les profils)
+    $racines = @($Env:ProgramFiles, ${Env:ProgramFiles(x86)},
+                 "$Env:LOCALAPPDATA\Programs") +
+               (Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName "AppData\Local\Programs" })
+    foreach ($racine in $racines) {
         if (-not $racine -or -not (Test-Path $racine)) { continue }
         $p = Get-ChildItem $racine -Filter "Unity Hub.exe" -Recurse -Depth 3 `
              -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($p) { return $p.FullName }
     }
     return $null
+}
+
+function Diagnostic-Hub {
+    Write-Host ""
+    Write-Host "--- DIAGNOSTIC (a envoyer a Claude) ---" -ForegroundColor Yellow
+    winget list --id Unity.UnityHub 2>$null | ForEach-Object { Write-Host $_ }
+    foreach ($d in @("$Env:ProgramFiles\Unity Hub",
+                     "$Env:LOCALAPPDATA\Programs")) {
+        Write-Host "contenu de ${d}:"
+        Get-ChildItem $d -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "  $($_.Name)" }
+    }
+    Write-Host "raccourcis Unity trouves :"
+    foreach ($menu in @("$Env:ProgramData\Microsoft\Windows\Start Menu",
+                        "$Env:APPDATA\Microsoft\Windows\Start Menu")) {
+        Get-ChildItem $menu -Filter "*Unity*" -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "  $($_.FullName)" }
+    }
+    Write-Host "---------------------------------------" -ForegroundColor Yellow
 }
 
 # --- 1. Unity Hub -----------------------------------------------------------
@@ -51,7 +91,7 @@ if (-not $hub) {
         --accept-package-agreements --accept-source-agreements
     for ($i = 0; $i -lt 30 -and -not (Trouve-Hub); $i++) { Start-Sleep 2 }
     $hub = Trouve-Hub
-    if (-not $hub) { throw "Unity Hub introuvable apres installation." }
+    if (-not $hub) { Diagnostic-Hub; throw "Unity Hub introuvable apres installation." }
 }
 Write-Host "Unity Hub : $hub"
 
