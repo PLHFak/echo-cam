@@ -46,7 +46,7 @@ from depth import DepthEstimator
 from bridge import Bridge
 from fond import Segmenter, Compositor
 
-ECHO_VERSION   = "1.13.2"
+ECHO_VERSION   = "1.14"
 
 # ---------------------------------------------------------------------------
 # Parametres par defaut (modifiables en direct via le panneau, touche P)
@@ -67,9 +67,9 @@ DIST_ACCEL     = 4.0      # m — rattrapage plein (v = Vmax)
 VMAX           = 2.0      # vitesse max de rattrapage
 VMIN           = 0.10     # plancher de vitesse quand quelqu'un est present :
                           # a 10 %, l'image ne fige jamais completement (0 = fige)
-DIST_SCALE     = 0.75     # correction d'echelle de la distance IA : mesuree
-                          # ~35 % trop longue sur la config PLH (touche C a 2 m
-                          # pour recaler automatiquement)
+DIST_SCALE     = 0.82     # correction de la distance IA : reel = brut x echelle
+DIST_OFFSET    = 0.65     # - decalage (m). Calee sur 2 mesures PLH :
+                          # brut 3.24 -> 2.00 m et brut 1.41 -> 0.50 m
 BUFFER_SECONDS = 30       # profondeur memoire = retard maxi (30 s * 720p ~ 2.5 Go RAM)
 SMOOTH_WINDOW  = 8        # lissage de la distance (nb de mesures)
 SMOOTH_SPEED   = 0.15     # lissage de la vitesse (0 = fige, 1 = instantane)
@@ -88,7 +88,6 @@ STABLE_SECONDS = 10.0     # duree d'immobilite avant nouvelle reference (1..9, 0
 CALIB_DISTANCE = 2.0      # distance (m) de la calibration manuelle (touche C)
 
 WIN_MAIN  = "ECHO"
-WIN_PANEL = "ECHO - Reglages"
 
 PRESETS_FILE = "presets.json"
 HUD_MODES    = ("complet", "vitesse", "aucun")
@@ -187,47 +186,14 @@ PANEL_DEFAULTS = {
     "Accel (cm)":       (int(DIST_ACCEL * 100),  600),
     "Vmax x10":         (int(VMAX * 10),         60),
     "Vmin (%)":         (int(VMIN * 100),        50),
-    "Echelle dist (%)": (int(DIST_SCALE * 100),  250),   # defaut 75 : mesure IA ~35 % trop longue
+    "Echelle dist (%)": (int(DIST_SCALE * 100),  250),
+    "Decalage (cm)":    (int(DIST_OFFSET * 100), 150),
     "Buffer (s)":       (BUFFER_SECONDS,         60),
     "Lissage dist":     (SMOOTH_WINDOW,          30),
     "Lissage vit x100": (int(SMOOTH_SPEED * 100), 100),
     "Hysteresis (cm)":  (int(HYSTERESIS * 100),  50),
     "Immobilite (s)":   (int(STABLE_SECONDS),    30),
 }
-
-PANEL_HELP = [
-    "Curseurs — R = defauts, P = masquer, S = sauver version",
-    "Arret (50) : plus pres, FIGE",
-    "Direct (200) : EN PHASE (v=1) ; entre les 2 : RALENTI",
-    "Accel (300) : v monte de 1 a Vmax entre Direct et Accel",
-    "Vmax (x2) : vitesse de rattrapage plein",
-    "Vmin (10%) : plancher - l'image ne fige jamais sous ce %",
-    "Echelle dist (75%) : correction de la distance IA (C a 2 m)",
-    "Buffer (30 s) : memoire d'images = retard maxi",
-    "Lissage dist (8) / vit (0.15) : transitions douces",
-    "Hysteresis (10 cm) : anti-oscillation au seuil FIGE",
-    "Immobilite (10 s) : duree avant nouvelle reference",
-]
-
-
-def panel_create():
-    cv2.namedWindow(WIN_PANEL, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(WIN_PANEL, 470, 900)
-    nop = lambda v: None
-    for nom, (defaut, maxi) in PANEL_DEFAULTS.items():
-        cv2.createTrackbar(nom, WIN_PANEL, defaut, maxi, nop)
-
-
-def panel_positions():
-    return {n: cv2.getTrackbarPos(n, WIN_PANEL) for n in PANEL_DEFAULTS}
-
-
-def panel_apply(vals):
-    for n, v in vals.items():
-        if n in PANEL_DEFAULTS:
-            maxi = PANEL_DEFAULTS[n][1]
-            cv2.setTrackbarPos(n, WIN_PANEL, min(int(v), maxi))
-
 
 def params_from_positions(g):
     """Positions brutes des curseurs -> parametres physiques coherents."""
@@ -238,6 +204,7 @@ def params_from_positions(g):
         "vmax":         max(10, g["Vmax x10"]) / 10.0,
         "vmin":         g["Vmin (%)"] / 100.0,
         "echelle":      max(25, g["Echelle dist (%)"]) / 100.0,
+        "decalage":     g["Decalage (cm)"] / 100.0,
         "buffer_s":     max(2,  g["Buffer (s)"]),
         "smooth_win":   max(1,  g["Lissage dist"]),
         "smooth_speed": max(1,  g["Lissage vit x100"]) / 100.0,
@@ -250,20 +217,6 @@ def params_from_positions(g):
         p["accel"] = p["full"] + 0.1
     return p
 
-
-def panel_draw(lines):
-    img = np.full((320 + 26 * len(PANEL_HELP), 470, 3), 30, np.uint8)
-    for i, (txt, ok) in enumerate(lines):
-        color = (120, 255, 120) if ok else (120, 120, 255)
-        cv2.putText(img, txt, (15, 35 + 30 * i), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.62, color, 1, cv2.LINE_AA)
-    y0 = 35 + 30 * len(lines) + 14
-    cv2.line(img, (15, y0 - 24), (455, y0 - 24), (90, 90, 90), 1)
-    for i, txt in enumerate(PANEL_HELP):
-        color = (200, 200, 200) if i == 0 else (170, 170, 170)
-        cv2.putText(img, txt, (15, y0 + 26 * i), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.52, color, 1, cv2.LINE_AA)
-    cv2.imshow(WIN_PANEL, img)
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +467,8 @@ def main():
     seg = Segmenter()
     comp = Compositor(CAP_WIDTH, CAP_HEIGHT) if seg.ok else None
     print(f"[ECHO] {seg.status}" + (f" (fond : {comp.source})" if comp else ""))
+    if comp:
+        print(f"[ECHO] {comp.spout.status}")
     debug_log("config", f"ECHO v{ECHO_VERSION} | {cuda_txt} | {rife.status} | "
                         f"rendu vise {RENDER_FPS} im/s (budget "
                         f"{1000.0 / RENDER_FPS:.1f} ms) | camera demandee "
@@ -571,9 +526,7 @@ def main():
 
     cv2.namedWindow(WIN_MAIN, cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty(WIN_MAIN, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-    panel_create()
-    panel_visible = True
-    saved_positions = panel_positions()
+    saved_positions = {n: d for n, (d, _) in PANEL_DEFAULTS.items()}
     p = params_from_positions(saved_positions)
     buffer_s = p["buffer_s"]
 
@@ -593,8 +546,6 @@ def main():
         vals = presets.get(nom)
         if vals is None:
             return
-        if panel_visible:
-            panel_apply(vals)
         saved_positions = {n: int(vals.get(n, d)) for n, (d, _) in
                            PANEL_DEFAULTS.items()}
         reset_on = bool(vals.get("_reset", True))
@@ -624,8 +575,6 @@ def main():
                     maxi = PANEL_DEFAULTS[nom_c][1]
                     val = max(0, min(int(cmd.get("v", 0)), maxi))
                     saved_positions[nom_c] = val
-                    if panel_visible:
-                        cv2.setTrackbarPos(nom_c, WIN_PANEL, val)
                 elif t == "option":
                     nom_o, v_o = cmd.get("nom"), cmd.get("v")
                     if nom_o == "interpolation":
@@ -640,8 +589,6 @@ def main():
                         hud_mode = HUD_MODES.index(v_o)
                 elif t == "defauts":
                     saved_positions = {n: d for n, (d, _) in PANEL_DEFAULTS.items()}
-                    if panel_visible:
-                        panel_apply(saved_positions)
                     stable_keys = None
                 elif t == "version":
                     action, nom_v = cmd.get("action"), str(cmd.get("nom", ""))
@@ -667,8 +614,6 @@ def main():
             except Exception as e:              # jamais fatal pour l'affichage
                 debug_log("web", f"commande invalide {cmd} : {e}")
 
-        if panel_visible:
-            saved_positions = panel_positions()
         p = params_from_positions(saved_positions)
         st.stable_secs = stable_keys if stable_keys is not None else float(p["stable_s"])
         st.smooth_window = p["smooth_win"]
@@ -679,7 +624,8 @@ def main():
         # --- vitesse cible (3 zones) + gel avec hysteresis + double lissage ---
         distance = st.distance
         if distance is not None and st.depth_mode == "ia":
-            distance *= p["echelle"]        # correction d'echelle (touche C a 2 m)
+            # correction : reel = brut x echelle - decalage (touche C a 2 m)
+            distance = max(0.05, distance * p["echelle"] - p["decalage"])
         if distance is None:
             frozen = False
         elif frozen:
@@ -816,35 +762,6 @@ def main():
             "extra": None if reset_on else "reset OFF : le retard reste (T)",
         })
 
-        # --- panneau (rafraichi a ~10 Hz, masquable touche P) ---
-        if panel_visible and n_frame % 6 == 0:
-            noms = sorted(presets)
-            liste = ", ".join(f"[{n}]" if n == active_preset else n
-                              for n in noms) if noms else "aucune (touche S)"
-            panel_draw([
-                (cuda_txt, cuda_ok),
-                (rife_txt, rife_ok),
-                (f"Etat : {etat}   Vitesse : {v_eff * 100:.0f} %", True),
-                (f"Distance : "
-                 f"{f'{distance:.2f} m' if distance else '--'}   "
-                 f"Retard : {delay:.1f} s", distance is not None),
-                (f"Camera : {st.fps_cam:.0f} im/s   Rendu : {fps_render:.0f} im/s",
-                 fps_render > RENDER_FPS - 3),
-                (f"Distance : {'IA ' + f'{st.depth_ms:.0f} ms' if st.depth_mode == 'ia' else 'epaules (secours)'}",
-                 st.depth_mode == "ia"),
-                (f"Reference : "
-                 f"{'auto (IA)' if st.depth_mode == 'ia' else ('calibree' if st.ref_width else 'en attente')}",
-                 st.depth_mode == "ia" or st.ref_width is not None),
-                (f"Buffer : {len(st.buffer) / FPS:.0f} / {buffer_s} s", True),
-                (f"Versions : {liste[:44]}", True),
-                (f"Anomalies : cam {st.cam_drops}  retard {late}  saut {jumps}",
-                 st.cam_drops + late + jumps == 0),
-                (f"Reset position : {'ON' if reset_on else 'OFF (retard garde)'}",
-                 reset_on),
-                (f"Fond virtuel : {'ON' if fond_on else 'OFF'} (touche V)",
-                 fond_on),
-                ("Touches : C D I T V H S P R fleches Q", True),
-            ])
         # --- etat pour le panneau web (~10 Hz) ---
         if n_frame % 6 == 0:
             bridge.publish({
@@ -861,6 +778,7 @@ def main():
                             "profondeur_ia": st.depth_mode == "ia",
                             "fond": fond_on, "hud": HUD_MODES[hud_mode]},
                 "fond_dispo": comp is not None,
+                "fond_src": ("Fond : " + comp.source_txt()) if comp else "Fond : indisponible",
                 "versions": {"liste": sorted(presets), "active": active_preset},
                 "version_app": ECHO_VERSION,
             })
@@ -939,32 +857,19 @@ def main():
             hud_mode = (hud_mode + 1) % len(HUD_MODES)
         if key in (ord('s'), ord('S')):         # sauver une version nommee
             naming = ""
-        if key in (ord('p'), ord('P')):         # masquer/afficher le panneau
-            if panel_visible:
-                saved_positions = panel_positions()
-                cv2.destroyWindow(WIN_PANEL)
-                panel_visible = False
-            else:
-                panel_create()
-                panel_apply(saved_positions)
-                panel_visible = True
         if key in (ord('c'), ord('C')):
             if st.depth_mode == "ia":           # recalage : je suis a 2 m
                 if st.distance:
-                    e = int(round(100.0 * CALIB_DISTANCE / st.distance))
+                    e = int(round(100.0 * (CALIB_DISTANCE + p["decalage"])
+                                  / st.distance))
                     e = max(25, min(250, e))
                     saved_positions["Echelle dist (%)"] = e
-                    if panel_visible:
-                        cv2.setTrackbarPos("Echelle dist (%)", WIN_PANEL, e)
                     debug_log("profondeur", f"recalage a {CALIB_DISTANCE} m : "
                                             f"echelle {e} %")
             else:
                 st.calib_request = True
             delay = 0.0
         if key in (ord('r'), ord('R')):         # valeurs par defaut
-            if panel_visible:
-                for nom_c, (defaut, _) in PANEL_DEFAULTS.items():
-                    cv2.setTrackbarPos(nom_c, WIN_PANEL, defaut)
             saved_positions = {n: d for n, (d, _) in PANEL_DEFAULTS.items()}
             stable_keys = None
         if ord('0') <= key <= ord('9'):         # duree d'immobilite : 1..9, 0=10

@@ -140,6 +140,7 @@
     </div>
     <div class="ligne" id="rife">—</div>
     <div class="ligne" id="prof">—</div>
+    <div class="ligne" id="fondsrc">—</div>
   </div>
 
   <div class="carte" id="c_reglages">
@@ -202,7 +203,9 @@ const CURSEURS = [
   ["Vmin (%)", "Vitesse plancher", 0, 50, v=>v+" %",
    "La lecture ne descend jamais sous ce pourcentage tant que quelqu'un est présent. À 10 %, l'image ne fige jamais complètement ; à 0, elle fige sous Arrêt."],
   ["Echelle dist (%)", "Échelle distance", 25, 250, v=>v+" %",
-   "Correction de la distance mesurée par l'IA, qui mesure ~35 % trop long (défaut : 75 %). Le plus simple : placez-vous à 2 m réels et pressez C dans la fenêtre vidéo, la correction se règle toute seule."],
+   "Facteur de correction de la distance IA : réel = brut × échelle − décalage (défaut 82 %). Le plus simple : placez-vous à 2 m réels et pressez C dans la fenêtre vidéo."],
+  ["Decalage (cm)", "Décalage distance", 0, 150, v=>v+" cm",
+   "Décalage constant soustrait de la distance IA après l'échelle (défaut 65 cm). Réglé avec l'échelle sur deux mesures réelles : 2 m et 0,5 m."],
   ["Buffer (s)", "Buffer (retard max)", 2, 60, v=>v+" s",
    "Mémoire d'images : c'est le retard maximum possible. 30 s en 720p ≈ 2,5 Go de RAM."],
   ["Lissage dist", "Lissage distance", 1, 30, v=>v,
@@ -300,6 +303,7 @@ function majEtat(s){
   $("verapp").textContent = "v" + (s.version_app || "—");
   $("rife").textContent = s.rife;
   $("prof").textContent = s.profondeur;
+  $("fondsrc").textContent = s.fond_src || "";
   if (document.activeElement !== $("o_hud")) $("o_hud").value = s.options.hud;
   $("o_interp").checked = s.options.interpolation;
   $("o_reset").checked  = s.options.reset;

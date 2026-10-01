@@ -6,6 +6,18 @@ par le numéro voulu) :
 
     https://github.com/PLHFak/echo-cam/archive/refs/heads/version/v1.3.zip
 
+## v1.14 — 01-10-2026 · Ancien panneau supprimé, distance recalée, fond Spout (étape 2)
+- **Ancienne fenêtre de réglages OpenCV supprimée** : le panneau web fait tout
+  (la touche P disparaît).
+- **Distance recalée sur 2 mesures réelles** : réel = brut × échelle − décalage.
+  Nouveau curseur **Décalage** (65 cm), échelle par défaut **82 %** — les deux
+  points PLH (2 m et 0,5 m) tombent juste. Touche C à 2 m : recalage auto.
+- **Étape 2 galerie — fond vivant par Spout** : dès qu'un émetteur Spout tourne
+  (Unity, OBS, TouchDesigner…), il devient le fond d'incrustation ; retour
+  automatique au fond fixe s'il disparaît. État affiché au panneau.
+- **emetteur_test.bat** : émetteur Spout de test (décor animé) pour valider
+  la chaîne sans Unity.
+
 ## v1.13.2 — 01-10-2026 · Panneau resserré : Réglages et Options côte à côte
 - Réglages (2 colonnes) et Options sur la même rangée, vertical resserré :
   tout le panneau tient sur un écran 1080p sans défiler.

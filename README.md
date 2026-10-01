@@ -43,7 +43,6 @@ cette position devient la nouvelle référence.
 | **H** | Mode du HUD incrusté : complet → vitesse seule → aucun |
 | **S** | Sauvegarder la version courante (taper un nom, **Entrée**) |
 | **←/→** | Version précédente / suivante (reset propre du run) |
-| **P** | Masquer / afficher le panneau de réglages |
 | **R** | Remettre tous les curseurs aux valeurs par défaut |
 | **1** à **9**, **0** | Durée d'immobilité avant nouvelle référence (1..9 s, 0 = 10 s) |
 | **Q** ou **Échap** | Quitter (cliquer d'abord sur la fenêtre vidéo) |
@@ -96,12 +95,21 @@ défaut entre parenthèses. La touche **R** remet tout aux valeurs par défaut.
 | **Direct (cm)** | 200 | Plus loin, lecture en direct (ou rattrapage). Entre Arrêt et Direct : ralenti progressif. |
 | **Vmax x10** | 20 (= 200 %) | Vitesse de rattrapage du direct en reculant. |
 | **Vmin (%)** | 10 | Plancher : la lecture ne descend jamais sous ce % (0 = l'image fige sous Arrêt). |
-| **Échelle dist (%)** | 75 | Correction de la distance IA — ou touche C à 2 m, réglage automatique. |
+| **Échelle dist (%)** | 82 | Facteur de la correction : réel = brut × échelle − décalage. Touche C à 2 m = réglage auto. |
+| **Décalage (cm)** | 65 | Décalage constant soustrait après l'échelle. |
 | **Buffer (s)** | 30 | Mémoire d'images : c'est le retard maximum possible. 30 s en 720p ≈ 2,5 Go de RAM. |
 | **Immobilité (s)** | 10 | Durée sans bouger avant que la position devienne la nouvelle référence (touches 1..9, 0 en direct). |
 
 Les réglages plus fins (lissage, délai salle vide `ABSENT_TIMEOUT`, tolérance
 d'immobilité) restent en tête de `main.py`.
+
+## Fond vivant par Spout (étape 2 galerie)
+
+Dès qu'un émetteur **Spout** tourne sur le PC (Unity, OBS, TouchDesigner,
+Resolume…), son image devient automatiquement le fond d'incrustation
+(touche V) ; s'il s'arrête, retour au fond fixe. Pour tester sans Unity :
+lancez l'application, activez le fond (V), puis double-cliquez sur
+**emetteur_test.bat** — le fond devient un décor animé.
 
 ## Caméra : tableau de contrôle
 
