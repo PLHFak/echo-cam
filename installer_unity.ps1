@@ -146,19 +146,24 @@ Start-Sleep 2
 function Editeurs-Installes {
     (Hub @("editors", "-i")) -join "`n"
 }
-$regex = [regex]"2022\.3\.\d+f\d+"
-$deja  = $regex.Matches((Editeurs-Installes)) | ForEach-Object Value | Select-Object -First 1
+# n'importe quel editeur moderne convient (2022.3 LTS, Unity 6 "6000.x"...) :
+# on prend celui deja installe par le Hub, sinon le plus recent propose
+$regex = [regex]"(?:6000|20\d\d)\.\d+\.\d+f\d+"
+function Choisit([string]$texte) {
+    $v = $regex.Matches($texte) | ForEach-Object Value | Select-Object -Unique
+    if (-not $v) { return $null }
+    ($v | Sort-Object { [version]($_ -replace "f\d+$", "") } | Select-Object -Last 1)
+}
+$deja = Choisit (Editeurs-Installes)
 if ($deja) {
     $version = $deja
-    Write-Host "Deja installe : $version"
+    Write-Host "Editeur deja installe : $version"
 } else {
-    $dispo = $regex.Matches(((Hub @("editors", "-r")) -join "`n")) |
-             ForEach-Object Value | Sort-Object {
-                 [int]($_ -replace "2022\.3\.(\d+)f\d+", '$1') } | Select-Object -Last 1
-    if (-not $dispo) { throw "Aucune version 2022.3 proposee par Unity Hub." }
+    $dispo = Choisit ((Hub @("editors", "-r")) -join "`n")
+    if (-not $dispo) { throw "Aucun editeur propose par Unity Hub (editors -r vide)." }
     Write-Host "Telechargement de Unity $dispo (~7 Go, 20 a 40 min)..."
     Hub @("install", "--version", $dispo) | ForEach-Object { Write-Host $_ }
-    $version = $regex.Matches((Editeurs-Installes)) | ForEach-Object Value | Select-Object -First 1
+    $version = Choisit (Editeurs-Installes)
     if (-not $version) { throw "L'installation de l'editeur a echoue." }
 }
 $unity = "$Env:ProgramFiles\Unity\Hub\Editor\$version\Editor\Unity.exe"
