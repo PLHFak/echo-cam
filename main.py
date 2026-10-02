@@ -465,7 +465,7 @@ def main():
 
     # detourage + fond virtuel (galerie, etape 1 ; touche V)
     seg = Segmenter()
-    comp = Compositor(CAP_WIDTH, CAP_HEIGHT) if seg.ok else None
+    comp = Compositor(CAP_WIDTH, CAP_HEIGHT, log=debug_log) if seg.ok else None
     print(f"[ECHO] {seg.status}" + (f" (fond : {comp.source})" if comp else ""))
     if comp:
         print(f"[ECHO] {comp.spout.status}")
