@@ -139,7 +139,7 @@ function Hub([string[]]$arguments) {
 }
 
 # --- 2. Editeur 2022.3 LTS --------------------------------------------------
-Etape "2/6 Editeur Unity 2022.3 LTS"
+Etape "2/6 Editeur Unity"
 # le Hub graphique verrouille son cache : on le ferme avant la ligne de commande
 Get-Process "Unity Hub" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep 2
@@ -175,12 +175,30 @@ if (-not (Test-Path $unity)) { throw "Unity.exe introuvable pour $version." }
 Write-Host "Editeur : $unity"
 
 # --- 3. Projet echo-galerie -------------------------------------------------
+# Unity est une application fenetree : il faut l'attendre explicitement
+# (Start-Process -Wait), sinon le script file avant la fin de la creation.
+function Unity-Attend([string[]]$arguments, [string]$log) {
+    $p = Start-Process $unity -ArgumentList $arguments -Wait -PassThru `
+                        -RedirectStandardOutput "$log.out" -ErrorAction Stop
+    return $p.ExitCode
+}
+
 Etape "3/6 Projet echo-galerie"
-if (-not (Test-Path (Join-Path $projet "Assets"))) {
-    Write-Host "Creation du projet (2 a 5 min)..."
-    & $unity -batchmode -quit -createProject $projet -logFile "$ici\unity_creation.log"
-    if ($LASTEXITCODE -ne 0) { throw "Creation du projet echouee (voir unity_creation.log)." }
-} else { Write-Host "Projet deja present : $projet" }
+$manifest = Join-Path $projet "Packages\manifest.json"
+if ((Test-Path $projet) -and -not (Test-Path $manifest)) {
+    Write-Host "Projet incomplet (passage precedent interrompu) : nettoyage..."
+    Remove-Item $projet -Recurse -Force -ErrorAction SilentlyContinue
+}
+if (-not (Test-Path $manifest)) {
+    Write-Host "Creation du projet (2 a 5 min, patientez)..."
+    $code = Unity-Attend @("-batchmode", "-quit", "-createProject", "`"$projet`"",
+                           "-logFile", "`"$ici\unity_creation.log`"") `
+                         "$ici\unity_creation.log"
+    if ($code -ne 0 -or -not (Test-Path $manifest)) {
+        throw "Creation du projet echouee (code $code - voir unity_creation.log)."
+    }
+}
+Write-Host "Projet : $projet"
 
 # --- 4. Fichiers ECHO -------------------------------------------------------
 Etape "4/6 Fichiers ECHO"
@@ -190,7 +208,6 @@ Write-Host "Scripts copies dans Assets\ECHO."
 
 # --- 5. Paquet Spout (KlakSpout) --------------------------------------------
 Etape "5/6 Paquet Spout (KlakSpout)"
-$manifest = Join-Path $projet "Packages\manifest.json"
 $m = Get-Content $manifest -Raw | ConvertFrom-Json
 if (-not ($m.PSObject.Properties.Name -contains "scopedRegistries")) {
     $m | Add-Member scopedRegistries @()
@@ -208,9 +225,11 @@ Write-Host "manifest.json mis a jour."
 # --- 6. Construction de la scene, puis ouverture ----------------------------
 Etape "6/6 Construction de la galerie"
 Write-Host "Import des paquets + construction (3 a 10 min, fenetre invisible)..."
-& $unity -projectPath $projet -batchmode -quit `
-         -executeMethod GalerieBuilder.Construire -logFile "$ici\unity_build.log"
-if ($LASTEXITCODE -ne 0) {
+$code = Unity-Attend @("-projectPath", "`"$projet`"", "-batchmode", "-quit",
+                       "-executeMethod", "GalerieBuilder.Construire",
+                       "-logFile", "`"$ici\unity_build.log`"") `
+                     "$ici\unity_build.log"
+if ($code -ne 0) {
     Write-Warning ("Construction automatique echouee (voir unity_build.log) - " +
                    "l'editeur va s'ouvrir : menu ECHO -> Construire la galerie.")
 }
