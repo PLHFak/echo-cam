@@ -124,7 +124,7 @@ if (-not $hub) {
     if (-not $hub) { Diagnostic-Hub; throw "Unity Hub introuvable apres installation." }
     # le Hub se lance souvent tout seul en fin d'installation : on le ferme
     Start-Sleep 3
-    Get-Process "Unity Hub" -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process "Unity Hub" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 Write-Host "Unity Hub : $hub"
 
@@ -141,7 +141,7 @@ function Hub([string[]]$arguments) {
 # --- 2. Editeur 2022.3 LTS --------------------------------------------------
 Etape "2/6 Editeur Unity 2022.3 LTS"
 # le Hub graphique verrouille son cache : on le ferme avant la ligne de commande
-Get-Process "Unity Hub" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process "Unity Hub" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep 2
 function Editeurs-Installes {
     (Hub @("editors", "-i")) -join "`n"
