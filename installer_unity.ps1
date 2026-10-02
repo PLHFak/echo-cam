@@ -129,12 +129,20 @@ if (-not $hub) {
 Write-Host "Unity Hub : $hub"
 
 function Hub([string[]]$arguments) {
-    # le Hub CLI ecrit sur stdout ; on capture tout
-    & $hub -- --headless @arguments 2>&1 | ForEach-Object { "$_" }
+    # le Hub ecrit des avertissements sur stderr (cache Chromium...) :
+    # on les capture en texte sans en faire des erreurs fatales
+    $ancien = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $texte = & $hub -- --headless @arguments 2>&1 | ForEach-Object { "$_" }
+    $ErrorActionPreference = $ancien
+    $texte
 }
 
 # --- 2. Editeur 2022.3 LTS --------------------------------------------------
 Etape "2/6 Editeur Unity 2022.3 LTS"
+# le Hub graphique verrouille son cache : on le ferme avant la ligne de commande
+Get-Process "Unity Hub" -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep 2
 function Editeurs-Installes {
     (Hub @("editors", "-i")) -join "`n"
 }
