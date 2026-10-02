@@ -91,14 +91,34 @@ if (-not $hub) {
     # pour que toute demande (Windows, antivirus) apparaisse a l'ecran.
     Write-Host "Telechargement de l'installeur Unity Hub (unity.com)..."
     $setup = Join-Path $Env:TEMP "UnityHubSetup.exe"
-    Invoke-WebRequest "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.exe" `
-                      -OutFile $setup
-    Write-Host ""
-    Write-Host ">>> L'installeur Unity Hub va s'ouvrir : cliquez Install / Suivant." `
-               -ForegroundColor Yellow
-    Write-Host ">>> Si l'antivirus (AVG) affiche une alerte : AUTORISER." `
-               -ForegroundColor Yellow
-    Start-Process $setup -Wait
+    $ok = $false
+    foreach ($url in @(
+        "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup-x64.exe",
+        "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.exe")) {
+        try {
+            Invoke-WebRequest $url -OutFile $setup
+            if ((Get-Item $setup).Length -gt 10MB) { $ok = $true; break }
+        } catch { Write-Host "  (indisponible : $url)" }
+    }
+    if ($ok) {
+        Write-Host ""
+        Write-Host ">>> L'installeur Unity Hub va s'ouvrir : cliquez Install / Suivant." `
+                   -ForegroundColor Yellow
+        Write-Host ">>> Si l'antivirus (AVG) affiche une alerte : AUTORISER." `
+                   -ForegroundColor Yellow
+        Start-Process $setup -Wait
+    } else {
+        # filet de secours : page officielle + installation manuelle
+        Write-Host ""
+        Write-Host ">>> Telechargement automatique impossible : la page officielle" `
+                   -ForegroundColor Yellow
+        Write-Host ">>> unity.com/download s'ouvre. Cliquez 'Download for Windows'," `
+                   -ForegroundColor Yellow
+        Write-Host ">>> installez Unity Hub, PUIS revenez ici et pressez Entree." `
+                   -ForegroundColor Yellow
+        Start-Process "https://unity.com/download"
+        Read-Host "Pressez Entree une fois Unity Hub installe"
+    }
     for ($i = 0; $i -lt 15 -and -not (Trouve-Hub); $i++) { Start-Sleep 2 }
     $hub = Trouve-Hub
     if (-not $hub) { Diagnostic-Hub; throw "Unity Hub introuvable apres installation." }
