@@ -238,7 +238,8 @@ if ($code -ne 0) {
                    "l'editeur va s'ouvrir : menu ECHO -> Construire la galerie.")
 }
 Write-Host "Ouverture de l'editeur Unity..."
-Start-Process $unity -ArgumentList "-projectPath", "`"$projet`""
+# un seul argument-chaine : transmis tel quel, le chemin reste entier
+Start-Process $unity -ArgumentList "-projectPath `"$projet`""
 Write-Host ""
 Write-Host "TERMINE. Dans Unity : ouvrir la scene Assets/ECHO/Galerie si besoin," `
            "puis bouton Play. Cote ECHO : lancer.bat + touche V." -ForegroundColor Green
