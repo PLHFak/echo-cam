@@ -219,7 +219,11 @@ if (-not ($m.scopedRegistries | Where-Object { $_.name -eq "Keijiro" })) {
 if (-not ($m.dependencies.PSObject.Properties.Name -contains "jp.keijiro.klak.spout")) {
     $m.dependencies | Add-Member "jp.keijiro.klak.spout" "2.0.3"
 }
-$m | ConvertTo-Json -Depth 10 | Set-Content $manifest -Encoding UTF8
+# UTF-8 SANS BOM : Set-Content -Encoding UTF8 ajoute un BOM (PowerShell 5)
+# et Unity refuse alors le manifest ("not valid JSON ... Char: 65279").
+[System.IO.File]::WriteAllText($manifest,
+    ($m | ConvertTo-Json -Depth 10),
+    (New-Object System.Text.UTF8Encoding $false))
 Write-Host "manifest.json mis a jour."
 
 # --- 6. Construction de la scene, puis ouverture ----------------------------
